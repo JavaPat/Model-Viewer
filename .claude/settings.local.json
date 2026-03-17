@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(echo '=== RuneLite jagexcache/oldschool/ ===' ls $USERPROFILE/.runelite/jagexcache/oldschool/ 2)",
+      "Bash(/dev/null __NEW_LINE_4c89622d0be50def__ echo '=== LIVE contents ===' ls $USERPROFILE/.runelite/jagexcache/oldschool/LIVE/)",
+      "Read(//mnt/c/Users/Patri/IdeaProjects/**)",
+      "Bash(./gradlew compileJava)",
+      "Bash(cd:*)",
+      "Read(//c/Program Files/Java/**)",
+      "Read(//c/Program Files/**)",
+      "Read(//c/Users/Patri/.jdks/**)",
+      "Bash(head:*)",
+      "Bash(ls:*)",
+      "Bash(python3:*)",
+      "Bash(cmd.exe /c \"gradlew.bat compileJava 2>&1\")",
+      "Bash(cmd.exe /c \"cd /d C:\\\\\\\\Users\\\\\\\\Patri\\\\\\\\IdeaProjects\\\\\\\\Model-Viewer && gradlew.bat compileJava && echo BUILD_OK || echo BUILD_FAILED\" 2>&1)",
+      "Bash(powershell.exe -Command \"Set-Location 'C:\\\\Users\\\\Patri\\\\IdeaProjects\\\\Model-Viewer'; .\\\\gradlew.bat compileJava 2>&1; Write-Host 'Exit:' $LASTEXITCODE\")",
+      "Bash(powershell.exe -Command \"Set-Location 'C:\\\\Users\\\\Patri\\\\IdeaProjects\\\\Model-Viewer'; .\\\\gradlew.bat compileJava 2>&1 | Select-String -NotMatch 'WARNING|unnamed module|NativeLibraryLoader|Restricted|native-platform'\")",
+      "Bash(powershell.exe -Command \"Set-Location 'C:\\\\Users\\\\Patri\\\\IdeaProjects\\\\Model-Viewer'; .\\\\gradlew.bat compileJava 2>&1 | Select-String 'error|BUILD|task' -CaseSensitive:$false\")",
+      "Bash(powershell.exe -Command \"Set-Location 'C:\\\\Users\\\\Patri\\\\IdeaProjects\\\\Model-Viewer'; .\\\\gradlew.bat compileJava 2>&1 | Where-Object { $_ -match 'error|BUILD|compileJava' }\")",
+      "Bash(cmd.exe /c \"cd /d C:\\\\Users\\\\Patri\\\\IdeaProjects\\\\Model-Viewer && mvn compile 2>&1\")",
+      "Bash(cmd.exe /c \"cd /d C:\\\\Users\\\\Patri\\\\IdeaProjects\\\\Model-Viewer && mvn compile\" 2>&1)",
+      "Bash(cmd.exe /c \"cd /d C:\\\\Users\\\\Patri\\\\IdeaProjects\\\\Model-Viewer && mvn compile > C:\\\\Users\\\\Patri\\\\build_output.txt 2>&1 && echo SUCCESS || echo FAILURE\")",
+      "Bash(cmd.exe /c \"type C:\\\\Users\\\\Patri\\\\build_output.txt\")",
+      "Bash(cmd.exe /c \"where mvn 2>&1\")",
+      "Bash(cmd.exe /c \"cd /d C:\\\\Users\\\\Patri\\\\IdeaProjects\\\\Model-Viewer && gradlew.bat compileJava > C:\\\\Users\\\\Patri\\\\build_output.txt 2>&1\")"
+    ]
+  }
+}
