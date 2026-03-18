@@ -115,7 +115,7 @@ public final class Camera {
         targetZ = centerZ;
 
         // 🔥 Force camera ABOVE and BACK
-        distance = radius * 2.5f;
+        distance = Math.min(radius * 1.5f + 1.0f, 25.0f);
 
         yaw = 0f;
 

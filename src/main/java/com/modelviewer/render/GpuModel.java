@@ -64,14 +64,20 @@ public final class GpuModel {
      */
     public void draw(boolean wireframe) {
         if (freed) return;
+
         glBindVertexArray(vao);
+
         if (wireframe) {
             glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
         }
-        glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_SHORT, 0L);
+
+        // 🔥 FIX: use UNSIGNED_INT (matches IntBuffer)
+        glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_INT, 0L);
+
         if (wireframe) {
-            glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);  // restore
+            glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
         }
+
         glBindVertexArray(0);
     }
 

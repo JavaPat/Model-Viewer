@@ -71,68 +71,80 @@ public final class ModelDecoder {
         Buffer yBuf    = new Buffer(data); yBuf.offset    = yOff;
         Buffer zBuf    = new Buffer(data); zBuf.offset    = zOff;
 
-        int bx = 0, by = 0, bz = 0;
+        int lastX = 0;
+        int lastY = 0;
+        int lastZ = 0;
 
         for (int i = 0; i < count; i++) {
             int flags = flagBuf.readUnsignedByte();
 
-            int dx = ((flags & 1) != 0) ? xBuf.readSignedSmart() : 0;
-            int dy = ((flags & 2) != 0) ? yBuf.readSignedSmart() : 0;
-            int dz = ((flags & 4) != 0) ? zBuf.readSignedSmart() : 0;
+            int dx = 0, dy = 0, dz = 0;
 
-            bx += dx;
-            by += dy;
-            bz += dz;
+            if ((flags & 1) != 0) dx = xBuf.readSignedSmart();
+            if ((flags & 2) != 0) dy = yBuf.readSignedSmart();
+            if ((flags & 4) != 0) dz = zBuf.readSignedSmart();
 
-            vx[i] = bx;
-            vy[i] = by;
-            vz[i] = bz;
+            lastX += dx;
+            lastY += dy;
+            lastZ += dz;
+
+            vx[i] = lastX;
+            vy[i] = lastY;
+            vz[i] = lastZ;
         }
+        System.out.println(vx[0] + ", " + vy[0] + ", " + vz[0]);
     }
+
 
     static void readFaceIndices(byte[] data,
                                 int compressOff, int indexOff,
                                 int faceCount,
                                 int[] fa, int[] fb, int[] fc) {
 
-        Buffer compBuf = new Buffer(data); compBuf.offset = compressOff;
-        Buffer idxBuf  = new Buffer(data); idxBuf.offset  = indexOff;
 
-        int a = 0, b = 0, c = 0, last = 0;
+        Buffer comp = new Buffer(data); comp.offset = compressOff;
+        Buffer idx  = new Buffer(data); idx.offset  = indexOff;
+
+        int a = 0, b = 0, c = 0;
+        int last = 0;
 
         for (int i = 0; i < faceCount; i++) {
-            int type = compBuf.readUnsignedByte() & 7; // OSRS uses lower 3 bits
+            int type = comp.readUnsignedByte();
 
-            switch (type) {
-                case 1 -> {
-                    a = idxBuf.readUnsignedSmart() + last;
-                    b = idxBuf.readUnsignedSmart() + a;
-                    c = idxBuf.readUnsignedSmart() + b;
-                    last = c;
-                }
-                case 2 -> {
-                    b = c;
-                    c = idxBuf.readUnsignedSmart() + last;
-                    last = c;
-                }
-                case 3 -> {
-                    a = c;
-                    c = idxBuf.readUnsignedSmart() + last;
-                    last = c;
-                }
-                case 4 -> {
-                    int tmp = a; a = b; b = tmp;
-                    c = idxBuf.readUnsignedSmart() + last;
-                    last = c;
-                }
-                default -> throw new IllegalStateException("Invalid face type: " + type);
+            if (type == 1) {
+                a = idx.readUnsignedSmart() + last;
+                b = idx.readUnsignedSmart() + last;
+                c = idx.readUnsignedSmart() + last;
+                last = c;
+            }
+            else if (type == 2) {
+                // 🔥 FAN behavior
+                b = c;
+                c = idx.readUnsignedSmart() + last;
+                last = c;
+            }
+            else if (type == 3) {
+                // 🔥 FAN flip
+                a = c;
+                c = idx.readUnsignedSmart() + last;
+                last = c;
+            }
+            else if (type == 4) {
+                int tmp = a;
+                a = b;
+                b = tmp;
+                c = idx.readUnsignedSmart() + last;
+                last = c;
             }
 
             fa[i] = a;
             fb[i] = b;
             fc[i] = c;
         }
+
     }
+
+
 
     static void validateFaceIndices(int vertexCount, int[] fa, int[] fb, int[] fc) {
         for (int i = 0; i < fa.length; i++) {

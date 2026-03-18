@@ -203,6 +203,9 @@ public final class ViewportPanel extends StackPane {
 
     /** Enqueues a mesh for display (may be called from any thread). */
     public void displayMesh(ModelMesh mesh) {
+        // 🔥 Reset camera BEFORE loading new model
+        renderer.getCamera().reset();
+
         renderer.setMesh(mesh);
     }
 

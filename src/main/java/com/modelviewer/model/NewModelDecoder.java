@@ -44,44 +44,51 @@ final class NewModelDecoder {
         }
 
         int pos = 0;
-        int vertexFlagsOff  = pos;  pos += vertexCount;
-        int faceCompressOff = pos;  pos += faceCount;
-        int facePriorityOff = pos;  pos += (globalPriority == 0xFF) ? faceCount : 0;
-        int faceSkinOff     = pos;  pos += (hasFaceSkins != 0) ? faceCount : 0;
-        int faceTypeOff     = pos;  pos += (flags & 1) != 0 ? faceCount : 0;
-        int vertexSkinOff   = pos;  pos += (hasVertexSkins != 0) ? vertexCount : 0;
-        int faceAlphaOff    = pos;  pos += (hasFaceAlpha != 0) ? faceCount : 0;
-        int faceIndexOff    = pos;  pos += faceIndexLen;
-        int faceTextureOff  = pos;  pos += (hasFaceTextures != 0) ? faceCount : 0;
-        int texCoordOff     = pos;  pos += texCoordLen;
-        int faceColorOff    = pos;  pos += faceCount * 2;
-        int texFaceOff      = pos;  pos += texFaceCount * 6;
-        int vertexXOff      = pos;  pos += xLen;
-        int vertexYOff      = pos;  pos += yLen;
-        int vertexZOff      = pos;  pos += zLen;
 
-        if (faceIndexOff >= data.length) {
-            throw new IllegalStateException("faceIndexOff out of bounds: " + faceIndexOff);
+        int vertexFlagsOff  = pos; pos += vertexCount;
+        int faceCompressOff = pos; pos += faceCount;
+        int facePriorityOff = pos; pos += (globalPriority == 0xFF) ? faceCount : 0;
+        int faceSkinOff     = pos; pos += (hasFaceSkins != 0) ? faceCount : 0;
+        int faceTypeOff     = pos; pos += (flags & 1) != 0 ? faceCount : 0;
+        int vertexSkinOff   = pos; pos += (hasVertexSkins != 0) ? vertexCount : 0;
+        int faceAlphaOff    = pos; pos += (hasFaceAlpha != 0) ? faceCount : 0;
+        int faceIndexOff    = pos; pos += faceIndexLen;
+
+        // ✅ FIX: textures are SHORTS (2 bytes each)
+        int faceTextureOff  = pos; pos += (hasFaceTextures != 0) ? faceCount * 2 : 0;
+
+        int texCoordOff     = pos; pos += texCoordLen;
+        int faceColorOff    = pos; pos += faceCount * 2;
+        int texFaceOff      = pos; pos += texFaceCount * 6;
+        int vertexXOff      = pos; pos += xLen;
+        int vertexYOff      = pos; pos += yLen;
+        int vertexZOff      = pos; pos += zLen;
+
+        if (faceIndexOff >= data.length || faceIndexOff + faceIndexLen > data.length) {
+            throw new IllegalStateException("Index section out of bounds");
         }
-        if (faceIndexOff + faceIndexLen > data.length) {
-            throw new IllegalStateException("faceIndexOff+len out of bounds: " + faceIndexOff + "+" + faceIndexLen);
-        }
+
         if (vertexZOff > data.length - 23) {
-            log.warn("Model {} new-format FD: section layout ({} bytes) overflows usable data ({} bytes) "
-                   + "— vertexCount={} faceCount={} xLen={} yLen={} faceIndexLen={}",
-                    modelId, vertexZOff, data.length - 23,
-                    vertexCount, faceCount, xLen, yLen, faceIndexLen);
+            log.warn("Model {} new-format FD layout overflow", modelId);
             return null;
         }
 
-        // ── Vertex positions (delta-encoded signed smarts) ────────────────────
+        // ── Vertices ─────────────────────────────────────────────
         int[] vx = new int[vertexCount];
         int[] vy = new int[vertexCount];
         int[] vz = new int[vertexCount];
-        ModelDecoder.readVertices(data, vertexFlagsOff, vertexXOff, vertexYOff, vertexZOff,
-                vertexCount, vx, vy, vz);
 
-        // ── Vertex skins ──────────────────────────────────────────────────────
+        ModelDecoder.readVertices(
+                data,
+                vertexFlagsOff,
+                vertexXOff,
+                vertexYOff,
+                vertexZOff,
+                vertexCount,
+                vx, vy, vz
+        );
+
+        // ── Vertex skins ─────────────────────────────────────────
         int[] vertexSkins = null;
         if (hasVertexSkins != 0) {
             vertexSkins = new int[vertexCount];
@@ -90,57 +97,65 @@ final class NewModelDecoder {
             }
         }
 
-        // ── Face colours ──────────────────────────────────────────────────────
+        // ── Face colours ─────────────────────────────────────────
         short[] faceColors = new short[faceCount];
         Buffer colorBuf = new Buffer(data);
         colorBuf.offset = faceColorOff;
+
         for (int i = 0; i < faceCount; i++) {
             faceColors[i] = (short) colorBuf.readUnsignedShort();
         }
 
-        // ── Per-face render types (optional) ──────────────────────────────────
+        // ── Face render types ────────────────────────────────────
         int[] faceTypes = null;
         if ((flags & 1) != 0) {
             faceTypes = new int[faceCount];
             Buffer typeBuf = new Buffer(data);
             typeBuf.offset = faceTypeOff;
+
             for (int i = 0; i < faceCount; i++) {
                 faceTypes[i] = typeBuf.readUnsignedByte();
             }
         }
 
-        // ── Per-face alphas (optional) ────────────────────────────────────────
+        // ── Face alphas ──────────────────────────────────────────
         int[] faceAlphas = null;
         if (hasFaceAlpha != 0) {
             faceAlphas = new int[faceCount];
             Buffer alphaBuf = new Buffer(data);
             alphaBuf.offset = faceAlphaOff;
+
             for (int i = 0; i < faceCount; i++) {
                 faceAlphas[i] = alphaBuf.readUnsignedByte();
             }
         }
 
-        // ── Texture triangles (defines UV reference frames) ───────────────────
+        // ── Face textures (FIXED) ────────────────────────────────
         int[] faceTextureIds = null;
         if (hasFaceTextures != 0) {
             faceTextureIds = new int[faceCount];
-            Buffer faceTextureBuf = new Buffer(data);
-            faceTextureBuf.offset = faceTextureOff;
+            Buffer texBuf = new Buffer(data);
+            texBuf.offset = faceTextureOff;
+
             for (int i = 0; i < faceCount; i++) {
-                int textureId = faceTextureBuf.readUnsignedByte();
-                faceTextureIds[i] = textureId == 255 ? -1 : textureId;
+                int texId = texBuf.readUnsignedShort(); // ✅ correct
+                faceTextureIds[i] = texId == 65535 ? -1 : texId;
             }
         }
 
+        // ── Texture triangles ────────────────────────────────────
         int[] texFaceP = null;
         int[] texFaceQ = null;
         int[] texFaceR = null;
+
         if (texFaceCount > 0) {
             texFaceP = new int[texFaceCount];
             texFaceQ = new int[texFaceCount];
             texFaceR = new int[texFaceCount];
+
             Buffer texFaceBuf = new Buffer(data);
             texFaceBuf.offset = texFaceOff;
+
             for (int i = 0; i < texFaceCount; i++) {
                 texFaceP[i] = texFaceBuf.readUnsignedShort();
                 texFaceQ[i] = texFaceBuf.readUnsignedShort();
@@ -148,20 +163,31 @@ final class NewModelDecoder {
             }
         }
 
-        // Present in the header for FF FD models; reserved here so later sections align.
-        int ignoredTexCoordOff = texCoordOff;
-        if (ignoredTexCoordOff < 0) {
-            throw new IllegalStateException("Invalid texture coordinate offset");
-        }
-
+        // ── Indices ──────────────────────────────────────────────
         int[] fa = new int[faceCount];
         int[] fb = new int[faceCount];
         int[] fc = new int[faceCount];
-        ModelDecoder.readFaceIndices(data, faceCompressOff, faceIndexOff, faceCount, fa, fb, fc);
+
+        ModelDecoder.readFaceIndices(
+                data,
+                faceCompressOff,
+                faceIndexOff,
+                faceCount,
+                fa, fb, fc
+        );
+
         ModelDecoder.validateFaceIndices(vertexCount, fa, fb, fc);
 
-        return new ModelMesh(modelId, vx, vy, vz, fa, fb, fc,
-                faceColors, faceTypes, faceAlphas, faceTextureIds, vertexSkins,
-                texFaceP, texFaceQ, texFaceR);
+        return new ModelMesh(
+                modelId,
+                vx, vy, vz,
+                fa, fb, fc,
+                faceColors,
+                faceTypes,
+                faceAlphas,
+                faceTextureIds,
+                vertexSkins,
+                texFaceP, texFaceQ, texFaceR
+        );
     }
 }
