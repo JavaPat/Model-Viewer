@@ -17,7 +17,6 @@ import java.util.*;
  * the old Jagex default into its own user-data directory:
  *
  *   Old Jagex default : %USERPROFILE%\jagexcache\oldschool\LIVE
- *   New Jagex default : %USERPROFILE%\.boneyard\jagexcache\oldschool\LIVE  ← renamed by Jagex
  *   RuneLite redirect : %USERPROFILE%\.runelite\jagexcache\oldschool\LIVE
  *
  * On macOS and Linux the equivalents are ~/jagexcache/… and ~/.runelite/jagexcache/…
@@ -25,7 +24,8 @@ import java.util.*;
  * On top of the standard locations, several additional path variants are checked:
  *   - RuneLite installed via Snap  : ~/snap/runelite/current/.runelite/jagexcache/oldschool/LIVE
  *   - RuneLite installed via Flatpak: ~/.var/app/net.runelite.RuneLite/.runelite/jagexcache/oldschool/LIVE
- *   - The new Jagex Launcher (2023+): %LOCALAPPDATA%\Jagex\Launcher\Saved Games\*\jagexcache\oldschool\LIVE
+ *   - The current Jagex Launcher: %LOCALAPPDATA%\Jagex\Old School RuneScape\data
+ *   - Older Jagex Launcher layouts: %LOCALAPPDATA%\Jagex\Launcher\Saved Games\*\jagexcache\oldschool\LIVE
  *
  * ──────────────────────────────────────────────────────────────────────────────
  * Settings-file parsing
@@ -176,18 +176,16 @@ public final class CacheDetector {
             collectRuneLiteConfiguredPaths(rlUserDir, list);
         }
 
-        // ── 2. New Jagex default (.boneyard, 2024+) ───────────────────────────
-        // Jagex renamed their cache root from jagexcache to .boneyard
-        list.add(candidate(getBoneyardCacheDir(), "Jagex (.boneyard)", false));
-
-        // ── 3. Standard Jagex cache (used by official Jagex Launcher / Steam) ─
+        // ── 2. Standard Jagex cache (used by official clients / Steam) ──────
         list.add(candidate(getJagexDefaultCacheDir(),
                 "OSRS official / Jagex Launcher", false));
 
-        // ── 3. New Jagex Launcher (2023+) ──────────────────────────────────────
-        // Jagex Launcher ≥ 2.0 can store the cache under %LOCALAPPDATA%\Jagex
+        // ── 3. Jagex Launcher variants ───────────────────────────────────────
+        // Current launcher builds store the cache under
+        // %LOCALAPPDATA%\Jagex\Old School RuneScape\data, while older builds
+        // used Launcher/Saved Games/.../jagexcache/oldschool/LIVE.
         for (File dir : getJagexLauncherPaths()) {
-            list.add(candidate(dir, "Jagex Launcher (new)", false));
+            list.add(candidate(dir, "Jagex Launcher", false));
         }
 
         // ── 4. Linux package-manager variants ─────────────────────────────────
@@ -293,24 +291,6 @@ public final class CacheDetector {
     }
 
     /**
-     * Returns the new Jagex cache directory (.boneyard, introduced ~2024).
-     *
-     * <pre>
-     *   Windows : %USERPROFILE%\.boneyard\jagexcache\oldschool\LIVE
-     *   macOS   : ~/.boneyard/jagexcache/oldschool/LIVE
-     *   Linux   : ~/.boneyard/jagexcache/oldschool/LIVE
-     * </pre>
-     */
-    public static File getBoneyardCacheDir() {
-        if (isWindows()) {
-            String profile = System.getenv("USERPROFILE");
-            String base = (profile != null && !profile.isEmpty()) ? profile : home().getAbsolutePath();
-            return new File(base, ".boneyard/" + OSRS_CACHE_SUBPATH);
-        }
-        return new File(home(), ".boneyard/" + OSRS_CACHE_SUBPATH);
-    }
-
-    /**
      * Returns the standard Jagex default cache directory.
      *
      * <pre>
@@ -354,16 +334,22 @@ public final class CacheDetector {
     }
 
     /**
-     * Returns candidate paths for the new Jagex Launcher (2023+).
+     * Returns candidate paths for current and older Jagex Launcher layouts.
      *
-     * The new launcher installs to %LOCALAPPDATA%\Jagex\Launcher and may store
-     * account-specific caches under a Saved Games sub-tree.
+     * Current launcher builds store the cache directly under:
+     *   %LOCALAPPDATA%\Jagex\Old School RuneScape\data
+     *
+     * Older builds installed under %LOCALAPPDATA%\Jagex\Launcher and could
+     * store account-specific caches under a Saved Games sub-tree.
      */
     private static List<File> getJagexLauncherPaths() {
         List<File> paths = new ArrayList<>();
         if (isWindows()) {
             String localApp = System.getenv("LOCALAPPDATA");
             if (localApp != null) {
+                // Current official launcher path
+                paths.add(new File(localApp, "Jagex/Old School RuneScape/data"));
+
                 // Direct cache under the launcher
                 File launcherCache = new File(localApp, "Jagex/Launcher/" + OSRS_CACHE_SUBPATH);
                 paths.add(launcherCache);

@@ -7,18 +7,10 @@ import org.slf4j.LoggerFactory;
 /**
  * Decodes OSRS "new" model files — the {@code [0xFF, 0xFD]} sentinel variant.
  */
-final class NewModelDecoder implements IModelDecoder {
+final class NewModelDecoder {
 
     private static final Logger log = LoggerFactory.getLogger(NewModelDecoder.class);
 
-    @Override
-    public boolean supports(byte[] data) {
-        if (data == null || data.length < 2) return false;
-        return (data[data.length - 2] & 0xFF) == 0xFF
-            && (data[data.length - 1] & 0xFF) == 0xFD;
-    }
-
-    @Override
     public ModelMesh decode(int modelId, byte[] data) {
         try {
             return decodeNewFormat(modelId, data);
@@ -29,8 +21,6 @@ final class NewModelDecoder implements IModelDecoder {
     }
 
     private static ModelMesh decodeNewFormat(int modelId, byte[] data) {
-        System.out.println("Detected FF FD model: " + modelId);
-
         Buffer header = new Buffer(data);
         header.offset = data.length - 23;
 
@@ -49,30 +39,26 @@ final class NewModelDecoder implements IModelDecoder {
         int faceIndexLen     = header.readUnsignedShort();
         int texCoordLen      = header.readUnsignedShort();
 
-        System.out.println("Model " + modelId +
-                " v=" + vertexCount +
-                " f=" + faceCount +
-                " idxLen=" + faceIndexLen);
-
         if (vertexCount <= 0 || vertexCount > 100000 || faceCount <= 0 || faceCount > 100000) {
             throw new IllegalStateException("Invalid header counts v=" + vertexCount + " f=" + faceCount);
         }
 
         int pos = 0;
         int vertexFlagsOff  = pos;  pos += vertexCount;
-        int faceTypeOff     = pos;  pos += faceCount;
+        int faceCompressOff = pos;  pos += faceCount;
         int facePriorityOff = pos;  pos += (globalPriority == 0xFF) ? faceCount : 0;
-        int faceAlphaOff    = pos;  pos += (hasFaceAlpha   != 0)   ? faceCount : 0;
-        int faceSkinOff     = pos;  pos += (hasFaceSkins   != 0)   ? faceCount : 0;
-        int vertexSkinOff   = pos;  pos += (hasVertexSkins != 0)   ? vertexCount : 0;
+        int faceSkinOff     = pos;  pos += (hasFaceSkins != 0) ? faceCount : 0;
+        int faceTypeOff     = pos;  pos += (flags & 1) != 0 ? faceCount : 0;
+        int vertexSkinOff   = pos;  pos += (hasVertexSkins != 0) ? vertexCount : 0;
+        int faceAlphaOff    = pos;  pos += (hasFaceAlpha != 0) ? faceCount : 0;
         int faceIndexOff    = pos;  pos += faceIndexLen;
+        int faceTextureOff  = pos;  pos += (hasFaceTextures != 0) ? faceCount : 0;
+        int texCoordOff     = pos;  pos += texCoordLen;
         int faceColorOff    = pos;  pos += faceCount * 2;
         int texFaceOff      = pos;  pos += texFaceCount * 6;
         int vertexXOff      = pos;  pos += xLen;
         int vertexYOff      = pos;  pos += yLen;
         int vertexZOff      = pos;  pos += zLen;
-
-        int faceCompressOff = faceTypeOff;
 
         if (faceIndexOff >= data.length) {
             throw new IllegalStateException("faceIndexOff out of bounds: " + faceIndexOff);
@@ -136,6 +122,16 @@ final class NewModelDecoder implements IModelDecoder {
 
         // ── Texture triangles (defines UV reference frames) ───────────────────
         int[] faceTextureIds = null;
+        if (hasFaceTextures != 0) {
+            faceTextureIds = new int[faceCount];
+            Buffer faceTextureBuf = new Buffer(data);
+            faceTextureBuf.offset = faceTextureOff;
+            for (int i = 0; i < faceCount; i++) {
+                int textureId = faceTextureBuf.readUnsignedByte();
+                faceTextureIds[i] = textureId == 255 ? -1 : textureId;
+            }
+        }
+
         int[] texFaceP = null;
         int[] texFaceQ = null;
         int[] texFaceR = null;
@@ -152,19 +148,17 @@ final class NewModelDecoder implements IModelDecoder {
             }
         }
 
+        // Present in the header for FF FD models; reserved here so later sections align.
+        int ignoredTexCoordOff = texCoordOff;
+        if (ignoredTexCoordOff < 0) {
+            throw new IllegalStateException("Invalid texture coordinate offset");
+        }
+
         int[] fa = new int[faceCount];
         int[] fb = new int[faceCount];
         int[] fc = new int[faceCount];
         ModelDecoder.readFaceIndices(data, faceCompressOff, faceIndexOff, faceCount, fa, fb, fc);
-
-        for (int i = 0; i < faceCount; i++) {
-            int a = fa[i];
-            int b = fb[i];
-            int c = fc[i];
-            if (a < 0 || a >= vertexCount || b < 0 || b >= vertexCount || c < 0 || c >= vertexCount) {
-                throw new IllegalStateException("Invalid indices (" + a + "," + b + "," + c + ")");
-            }
-        }
+        ModelDecoder.validateFaceIndices(vertexCount, fa, fb, fc);
 
         return new ModelMesh(modelId, vx, vy, vz, fa, fb, fc,
                 faceColors, faceTypes, faceAlphas, faceTextureIds, vertexSkins,

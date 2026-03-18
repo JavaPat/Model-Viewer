@@ -69,6 +69,9 @@ dependencies {
 
     // ── Database ─────────────────────────────────────────────────────────────
     implementation("org.xerial:sqlite-jdbc:3.45.3.0")
+
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
 java {
@@ -83,6 +86,10 @@ tasks.named<JavaExec>("run") {
         "--add-opens", "java.base/java.nio=ALL-UNNAMED",
         "--add-exports", "javafx.graphics/com.sun.javafx.application=ALL-UNNAMED"
     )
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 // ── ProGuard obfuscation ─────────────────────────────────────────────────────

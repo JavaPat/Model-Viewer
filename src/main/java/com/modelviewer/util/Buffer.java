@@ -104,6 +104,17 @@ public final class Buffer {
     }
 
     /**
+     * Reads the standard OSRS "smart" value used by model face/index streams.
+     *
+     * Encoding:
+     *   If the first byte < 128 → read 1 byte, return value (0–127)
+     *   Otherwise              → read 2 bytes, return (value - 32768) (0–32767)
+     */
+    public int readSmart() {
+        return readUnsignedSmart();
+    }
+
+    /**
      * Reads a "big smart" value used in newer cache formats for large IDs.
      *
      * Encoding:

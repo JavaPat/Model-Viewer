@@ -99,6 +99,12 @@ public final class Renderer {
     /** Forced debug camera override (eye=(0,0,5), target=(0,0,0)). */
     private volatile boolean debugCameraOverride = false;
 
+    /** Model rotation applied in the shader/model matrix, not by mutating vertices. */
+    private static final float DEFAULT_MODEL_ROTATION_X = 0f;
+    private static final float DEFAULT_MODEL_ROTATION_Y = 0f;
+    private volatile float modelRotationX = DEFAULT_MODEL_ROTATION_X;
+    private volatile float modelRotationY = DEFAULT_MODEL_ROTATION_Y;
+
     // ── Pipeline diagnostic ───────────────────────────────────────────────────
     //
     // When pipelineDiagnosticMode is true, the renderer bypasses:
@@ -300,6 +306,8 @@ public final class Renderer {
             currentGpuModel = cached;
             currentModelId  = mesh.modelId;
             firstDrawLogged = false;
+            modelRotationX = DEFAULT_MODEL_ROTATION_X;
+            modelRotationY = DEFAULT_MODEL_ROTATION_Y;
             float inv128 = 1.0f / 128.0f;
             float radius = mesh.boundingRadius() * inv128;
             camera.frameModel(0, 0, 0, radius);
@@ -339,6 +347,7 @@ public final class Renderer {
                 0,0,0,1
             };
             shader.setUniformMatrix4f("uMVP", identity);
+            shader.setUniformMatrix4f("uModel", identity);
             shader.setUniform1i("uRenderMode", 2);  // flat colour — no lighting needed
             shader.setUniform3f("uLightDir", 0f, 1f, 0f);
             shader.setUniform3f("uWireColor", 1f, 1f, 0f);
@@ -351,9 +360,12 @@ public final class Renderer {
 
             float[] proj = camera.getProjectionMatrix();
             float[] view = camera.getViewMatrix();
-            float[] mvp  = Camera.multiply(proj, view);
+            float[] model = buildModelMatrix();
+            float[] vp = Camera.multiply(proj, view);
+            float[] mvp = Camera.multiply(vp, model);
 
             shader.setUniformMatrix4f("uMVP", mvp);
+            shader.setUniformMatrix4f("uModel", model);
             shader.setUniform1i("uRenderMode", renderMode);
             shader.setUniform3f("uLightDir", 0.5f, 1.0f, 0.7f);
             shader.setUniform3f("uWireColor", 0.85f, 0.85f, 0.85f);
@@ -367,14 +379,18 @@ public final class Renderer {
             if (!firstDrawLogged) {
                 firstDrawLogged = true;
                 float[] eye = camera.getEyePosition();
+                float[] target = camera.getTargetPosition();
+                float[] forward = camera.getForwardVector();
                 String drawMsg = String.format(
-                    "[RENDER] First draw: model #%d, %d indices (GL_TRIANGLES), shader_mode=%d, bypassMvp=%b, eye=(%.3f,%.3f,%.3f)%n" +
+                    "[RENDER] First draw: model #%d, %d indices (GL_TRIANGLES), shader_mode=%d, bypassMvp=%b, eye=(%.3f,%.3f,%.3f), target=(%.3f,%.3f,%.3f), forward=(%.3f,%.3f,%.3f)%n" +
                     "  MVP col0=(%.3f %.3f %.3f %.3f)%n" +
                     "  MVP col1=(%.3f %.3f %.3f %.3f)%n" +
                     "  MVP col2=(%.3f %.3f %.3f %.3f)%n" +
                     "  MVP col3=(%.3f %.3f %.3f %.3f)",
                     currentModelId, currentGpuModel.getIndexCount(), renderMode, bypassMvp,
                     eye[0], eye[1], eye[2],
+                    target[0], target[1], target[2],
+                    forward[0], forward[1], forward[2],
                     mvp[0],  mvp[1],  mvp[2],  mvp[3],
                     mvp[4],  mvp[5],  mvp[6],  mvp[7],
                     mvp[8],  mvp[9],  mvp[10], mvp[11],
@@ -382,9 +398,11 @@ public final class Renderer {
                 log.info(drawMsg);
                 Consumer<String> el = eventLogger;
                 if (el != null) el.accept(String.format(
-                    "[RENDER] First draw: model #%d, %d indices, bypassMvp=%b, eye=(%.2f,%.2f,%.2f)",
+                    "[RENDER] First draw: model #%d, %d indices, bypassMvp=%b, eye=(%.2f,%.2f,%.2f), target=(%.2f,%.2f,%.2f), forward=(%.2f,%.2f,%.2f)",
                     currentModelId, currentGpuModel.getIndexCount(), bypassMvp,
-                    eye[0], eye[1], eye[2]));
+                    eye[0], eye[1], eye[2],
+                    target[0], target[1], target[2],
+                    forward[0], forward[1], forward[2]));
             }
 
             // Drain ALL GL errors so none are silently missed.
@@ -459,7 +477,7 @@ public final class Renderer {
      */
     public void setDebugCameraOverride(boolean enabled) {
         this.debugCameraOverride = enabled;
-        camera.setDebugLookAt(0f, 0f, 5f, 0f, 0f, 0f);
+        camera.setDebugLookAt(0f, 2.5f, 6f, 0f, 1f, 0f);
         camera.setDebugOverride(enabled);
     }
 
@@ -495,6 +513,14 @@ public final class Renderer {
     public void setGridVisible(boolean visible) { grid.setVisible(visible); }
     public boolean isGridVisible()              { return grid.isVisible(); }
 
+    public void rotateModel(float dx, float dy) {
+        final float sensitivity = (float) Math.toRadians(0.2f);
+        modelRotationY += dx * sensitivity;
+        modelRotationX += dy * sensitivity;
+        float maxPitch = (float) Math.toRadians(89.0);
+        modelRotationX = Math.max(-maxPitch, Math.min(maxPitch, modelRotationX));
+    }
+
     public int  getWidth()  { return context.getWidth();  }
     public int  getHeight() { return context.getHeight(); }
 
@@ -502,4 +528,25 @@ public final class Renderer {
 
     /** Sets a callback invoked on the render thread for GPU-upload events. */
     public void setEventLogger(Consumer<String> logger) { this.eventLogger = logger; }
+
+    private float[] buildModelMatrix() {
+        float sx = (float) Math.sin(modelRotationX);
+        float cx = (float) Math.cos(modelRotationX);
+        float sy = (float) Math.sin(modelRotationY);
+        float cy = (float) Math.cos(modelRotationY);
+
+        float[] rotateX = {
+            1, 0, 0, 0,
+            0, cx, sx, 0,
+            0, -sx, cx, 0,
+            0, 0, 0, 1
+        };
+        float[] rotateY = {
+            cy, 0, -sy, 0,
+            0, 1, 0, 0,
+            sy, 0, cy, 0,
+            0, 0, 0, 1
+        };
+        return Camera.multiply(rotateY, rotateX);
+    }
 }

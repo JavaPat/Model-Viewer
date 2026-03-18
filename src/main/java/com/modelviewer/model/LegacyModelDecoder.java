@@ -4,16 +4,10 @@ import com.modelviewer.util.Buffer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-final class LegacyModelDecoder implements IModelDecoder {
+final class LegacyModelDecoder {
 
     private static final Logger log = LoggerFactory.getLogger(LegacyModelDecoder.class);
 
-    @Override
-    public boolean supports(byte[] data) {
-        return data != null && data.length >= 20;
-    }
-
-    @Override
     public ModelMesh decode(int modelId, byte[] data) {
         try {
             return decodeOldFormat(modelId, data);

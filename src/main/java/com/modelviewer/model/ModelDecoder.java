@@ -6,24 +6,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Pipeline facade for decoding raw OSRS model bytes into a {@link ModelMesh}.
- *
- * <p>Delegates to a fixed list of {@link IModelDecoder} implementations tried in
- * registration order.  The first decoder whose {@link IModelDecoder#supports}
- * returns {@code true} is invoked; if it returns a non-null result that result is
- * returned immediately.  If it returns {@code null} (parse failure) the next
- * matching decoder is tried.  If all decoders fail, {@code null} is returned.</p>
- *
- * <p>Registered decoders (in order):
- * <ol>
- *   <li>{@link ModernModelDecoder} — handles MODERN and NEW_V12 sentinel formats</li>
- *   <li>{@link LegacyModelDecoder} — fallback, handles the legacy RS2/OSRS format</li>
- * </ol>
- * </p>
+ * Facade for decoding raw OSRS model bytes into a {@link ModelMesh}.
  *
  * <p>The static helper methods {@link #readVertices} and {@link #readFaceIndices}
- * are package-private so that the individual decoder implementations can share
- * them.  {@link #hslToRgb} is public because {@link com.modelviewer.render.MeshUploader}
+ * are package-private so that decoder implementations can share them.
+ * {@link #hslToRgb} is public because {@link com.modelviewer.render.MeshUploader}
  * calls it.</p>
  *
  * ──────────────────────────────────────────────────────────────────────────────
@@ -51,12 +38,6 @@ public final class ModelDecoder {
 
     private static final Logger log = LoggerFactory.getLogger(ModelDecoder.class);
 
-    /** Ordered list of decoders tried for each model. */
-    private static final IModelDecoder[] REGISTERED_DECODERS = {
-        new ModernModelDecoder(),
-        new LegacyModelDecoder()
-    };
-
     private ModelDecoder() {}
 
     /**
@@ -72,7 +53,6 @@ public final class ModelDecoder {
             return null;
         }
 
-        // Dump the last 32 bytes so we can see the sentinel + header bytes
         int dumpStart = Math.max(0, data.length - 32);
         StringBuilder hex = new StringBuilder();
         for (int i = dumpStart; i < data.length; i++) {
@@ -85,25 +65,22 @@ public final class ModelDecoder {
         byte b1 = data[data.length - 2];
         byte b2 = data[data.length - 1];
         boolean isModern = b1 == (byte) 0xFF && b2 == (byte) 0xFE;
-        boolean isNew = b1 == (byte) 0xFF && b2 == (byte) 0xFD;
+        boolean isNew    = b1 == (byte) 0xFF && b2 == (byte) 0xFD;
 
-        ModelMesh mesh;
+        ModelMesh mesh = null;
         if (isNew) {
-            System.out.println("Model " + modelId + " using format: FF FD");
-            System.out.println("Trying FF FD decode for " + modelId);
             mesh = new NewModelDecoder().decode(modelId, data);
-        } else if (isModern) {
-            System.out.println("Model " + modelId + " using format: FF FE");
-            System.out.println("Trying modern decode for " + modelId);
+        }
+
+        if (mesh == null && isModern) {
             mesh = new ModernModelDecoder().decode(modelId, data);
-        } else {
-            System.out.println("Model " + modelId + " using format: legacy");
-            System.out.println("Trying legacy decode for " + modelId);
+        }
+
+        if (mesh == null) {
             mesh = new LegacyModelDecoder().decode(modelId, data);
         }
 
         if (mesh != null) {
-            System.out.println("Decoded model " + modelId);
             return mesh;
         }
 
@@ -143,16 +120,16 @@ public final class ModelDecoder {
     /**
      * Reads the triangle index data, which is split between two sections:
      *   - {@code compressOff}: one byte per face, low 3 bits = strip type
-     *   - {@code indexOff}: delta-encoded vertex indices using UNSIGNED smarts
+     *   - {@code indexOff}: delta-encoded vertex indices using standard smarts
      *
      * Strip types (low 3 bits of the compress byte) — RS2/OSRS reference encoding:
-     *   1 → new triangle  : a=usmart+last, b=usmart+last, c=usmart+last  (3 new verts)
-     *   2 → strip forward : a=old_b, b=old_c, c=usmart+last              (rotate A→B→C→new)
-     *   3 → strip back    : a=old_a, b=old_a, c=usmart+last              (A stays, B=old_A, new C)
-     *   4 → strip swap    : a=old_b, b=old_a, c=usmart+last              (swap A↔B, new C)
+     *   1 → new triangle  : a=smart+last, b=smart+a,    c=smart+b     (3 new verts)
+     *   2 → strip forward : a=old_a,      b=old_c,      c=smart+last
+     *   3 → strip back    : a=old_c,      b=old_b,      c=smart+last
+     *   4 → strip swap    : a=old_b,      b=old_a,      c=smart+last
      *
      * "last" always tracks the most recently emitted vertex index and acts as the
-     * base for the next unsigned-smart delta read.  Deltas are always ≥ 0.
+     * base for the next delta read.
      */
     static void readFaceIndices(byte[] data,
                                 int compressOff, int indexOff,
@@ -168,24 +145,26 @@ public final class ModelDecoder {
             switch (type) {
                 case 1 -> {
                     // All three vertices are new.
-                    a = idxBuf.readUnsignedSmart() + last; last = a;
-                    b = idxBuf.readUnsignedSmart() + last; last = b;
-                    c = idxBuf.readUnsignedSmart() + last; last = c;
+                    a = idxBuf.readSmart() + last;
+                    b = idxBuf.readSmart() + a;
+                    c = idxBuf.readSmart() + b;
+                    last = c;
                 }
                 case 2 -> {
-                    a = b;
                     b = c;
-                    c = idxBuf.readUnsignedSmart() + last;
+                    c = idxBuf.readSmart() + last;
                     last = c;
                 }
                 case 3 -> {
-                    b = a;
-                    c = idxBuf.readUnsignedSmart() + last; last = c;
+                    a = c;
+                    c = idxBuf.readSmart() + last;
+                    last = c;
                 }
                 case 4 -> {
                     // Swap A and B (reverse winding), then add new C.
                     int tmp = a; a = b; b = tmp;
-                    c = idxBuf.readUnsignedSmart() + last; last = c;
+                    c = idxBuf.readSmart() + last;
+                    last = c;
                 }
                 default -> throw new IllegalStateException("Invalid face type: " + type);
             }
@@ -193,6 +172,18 @@ public final class ModelDecoder {
             if (!firstLogged && type != 0) {
                 log.debug("  face[0] type={} → ({},{},{})", type, a, b, c);
                 firstLogged = true;
+            }
+        }
+    }
+
+    static void validateFaceIndices(int vertexCount, int[] fa, int[] fb, int[] fc) {
+        for (int i = 0; i < fa.length; i++) {
+            int a = fa[i];
+            int b = fb[i];
+            int c = fc[i];
+            if (a < 0 || a >= vertexCount || b < 0 || b >= vertexCount || c < 0 || c >= vertexCount) {
+                throw new IllegalStateException(
+                        "Invalid indices at face " + i + ": (" + a + "," + b + "," + c + ") for vertexCount=" + vertexCount);
             }
         }
     }

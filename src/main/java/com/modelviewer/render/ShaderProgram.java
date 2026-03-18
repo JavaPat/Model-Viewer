@@ -59,7 +59,7 @@ public final class ShaderProgram {
         // Pre-populate the location cache for all known uniforms so that any
         // "not found" (-1) cases are logged once at startup rather than silently
         // failing every frame.
-        preCacheUniforms("uMVP", "uRenderMode", "uLightDir", "uWireColor", "uBypassMvp", "uTexture", "uHasTexture");
+        preCacheUniforms("uMVP", "uModel", "uRenderMode", "uLightDir", "uWireColor", "uBypassMvp", "uTexture", "uHasTexture");
 
         log.debug("Shader program {} linked successfully", programId);
     }

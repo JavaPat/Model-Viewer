@@ -393,10 +393,10 @@ public final class MainWindow extends Application {
 
                 ModelMesh mesh = ModelDecoder.decode(modelId, data);
                 if (mesh == null) {
-                    log.debug("Skipped model {} (unsupported format)", modelId);
+                    log.debug("Skipped model {} (decode failed)", modelId);
                     Platform.runLater(() -> {
-                        modelListPanel.setStatus("Model #" + modelId + " unsupported");
-                        controlPanel.setModelInfo("Unsupported model");
+                        modelListPanel.setStatus("Model #" + modelId + " failed to decode");
+                        controlPanel.setModelInfo("Decode failed");
                     });
                     return;
                 }

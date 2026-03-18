@@ -1,159 +1,134 @@
 package com.modelviewer.render;
 
 /**
- * Orbit-style camera that produces View and Projection matrices for OpenGL.
+ * Blender-style orbit camera.
  *
- * Controls:
- *   Left-mouse drag  → rotate (azimuth + elevation)
- *   Scroll wheel     → zoom (move eye along the radial axis)
- *   Middle-mouse drag → pan (translate the pivot point in screen space)
+ * State:
+ *   - target: point the camera orbits around
+ *   - distance: eye-to-target distance
+ *   - yaw/pitch: orbit angles around the target
  *
- * Coordinate system: right-handed, Y-up (standard OpenGL convention).
- * OSRS uses Y-up too, but with negative Y for "up" visually — the camera
- * compensates by looking at the model from a slight elevation.
+ * Coordinate system: right-handed, Y-up.
  */
 public final class Camera {
 
-    // ── Orbit parameters ─────────────────────────────────────────────────────
+    private static final float DEFAULT_TARGET_X = 0f;
+    private static final float DEFAULT_TARGET_Y = 1f;
+    private static final float DEFAULT_TARGET_Z = 0f;
+    private static final float DEFAULT_DISTANCE = 6.5f;
+    private static final float DEFAULT_YAW = 0f;
+    private static final float DEFAULT_PITCH = (float) Math.toRadians(14.0);
 
-    /** Horizontal rotation angle around the world Y-axis (radians). */
-    private float azimuth   = 0f;
+    private static final float ROTATE_SENSITIVITY = 0.005f;
+    private static final float PAN_SPEED = 2.5f;
+    private static final float ZOOM_SPEED = 0.35f;
+    private static final float MIN_DISTANCE = 1.0f;
+    private static final float MAX_DISTANCE = 200.0f;
 
-    /** Vertical rotation angle (radians). Clamped to avoid gimbal lock. */
-    private float elevation = 0.4f;
+    private float targetX = DEFAULT_TARGET_X;
+    private float targetY = DEFAULT_TARGET_Y;
+    private float targetZ = DEFAULT_TARGET_Z;
 
-    /** Distance from camera to pivot point. */
-    private float radius    = 3.0f;
+    private float distance = DEFAULT_DISTANCE;
+    private float yaw = DEFAULT_YAW;
+    private float pitch = DEFAULT_PITCH;
 
-    /** World-space pivot point (camera always looks at this). */
-    private float pivotX    = 0f;
-    private float pivotY    = 1.5f;
-    private float pivotZ    = 0f;
+    private float fovY   = (float) Math.toRadians(70.0);
+    private float aspect = 1.0f;
+    private float near   = 0.1f;
+    private float far    = 500.0f;
 
-    // ── Projection parameters ────────────────────────────────────────────────
-
-    private float fovY      = (float) Math.toRadians(70.0);
-    private float aspect    = 1.0f;
-    private float near      = 0.1f;
-    private float far       = 500.0f;
-
-    // ── Debug override (forced camera pose) ─────────────────────────────────
     private boolean debugOverride = false;
-    private float debugEyeX = 0f, debugEyeY = 0f, debugEyeZ = 5f;
-    private float debugTargetX = 0f, debugTargetY = 0f, debugTargetZ = 0f;
-
-    // ── Drag tracking (populated by ViewportPanel input handlers) ────────────
-
-    private float lastMouseX, lastMouseY;
-    private boolean draggingLeft, draggingMiddle;
+    private float debugEyeX = 0f, debugEyeY = 2.5f, debugEyeZ = 6f;
+    private float debugTargetX = DEFAULT_TARGET_X, debugTargetY = DEFAULT_TARGET_Y, debugTargetZ = DEFAULT_TARGET_Z;
 
     public Camera() {}
 
-    // ── Input handlers ────────────────────────────────────────────────────────
-
-    public void onMousePressed(float x, float y, boolean left, boolean middle) {
-        lastMouseX = x;
-        lastMouseY = y;
-        if (left)   draggingLeft   = true;
-        if (middle) draggingMiddle = true;
-    }
-
-    public void onMouseReleased(boolean left, boolean middle) {
-        if (left)   draggingLeft   = false;
-        if (middle) draggingMiddle = false;
-    }
-
-    public void onMouseDragged(float x, float y) {
-        float dx = x - lastMouseX;
-        float dy = y - lastMouseY;
-        lastMouseX = x;
-        lastMouseY = y;
-
-        if (draggingLeft) {
-            // Orbit: horizontal drag rotates around Y (azimuth)
-            //        vertical drag changes elevation
-            azimuth   -= dx * 0.005f;
-            elevation += dy * 0.005f;
-            elevation = Math.max(-1.5f, Math.min(1.5f, elevation)); // clamp
+    public void update(float deltaSeconds, boolean panForward, boolean panBackward,
+                       boolean panLeft, boolean panRight) {
+        if (deltaSeconds <= 0f) {
+            return;
         }
 
-        if (draggingMiddle) {
-            // Pan: move the pivot in the camera's right/up directions
-            float[] right = getRightVector();
-            float[] up    = getUpVector();
+        float panAmount = PAN_SPEED * deltaSeconds;
+        float[] forward = getForwardVector();
+        float[] right = normalize(cross(forward, new float[]{0f, 1f, 0f}));
 
-            float panScale = radius * 0.002f;
-            pivotX -= (right[0] * dx - up[0] * dy) * panScale;
-            pivotY -= (right[1] * dx - up[1] * dy) * panScale;
-            pivotZ -= (right[2] * dx - up[2] * dy) * panScale;
+        float moveX = 0f, moveY = 0f, moveZ = 0f;
+        if (panLeft) {
+            moveX -= right[0] * panAmount;
+            moveY -= right[1] * panAmount;
+            moveZ -= right[2] * panAmount;
         }
+        if (panRight) {
+            moveX += right[0] * panAmount;
+            moveY += right[1] * panAmount;
+            moveZ += right[2] * panAmount;
+        }
+        if (panForward) {
+            moveY += panAmount;
+        }
+        if (panBackward) {
+            moveY -= panAmount;
+        }
+
+        targetX += moveX;
+        targetY += moveY;
+        targetZ += moveZ;
+    }
+
+    public void rotateLook(float dx, float dy) {
+        yaw += dx * ROTATE_SENSITIVITY;
+        pitch += dy * ROTATE_SENSITIVITY;
+        pitch = clamp(pitch, (float) Math.toRadians(-89.0), (float) Math.toRadians(89.0));
     }
 
     public void onScroll(float delta) {
-        // Zoom: scroll in/out moves the eye closer/farther
-        radius *= (1f - delta * 0.1f);
-        radius = Math.max(0.1f, radius);
+        distance -= delta * ZOOM_SPEED;
+        distance = clamp(distance, MIN_DISTANCE, MAX_DISTANCE);
     }
 
-    // ── Matrix computation ────────────────────────────────────────────────────
-
-    /**
-     * Computes the 4×4 view matrix (column-major, suitable for glUniformMatrix4fv).
-     * This is a lookAt matrix from the orbiting eye position to the pivot.
-     */
     public float[] getViewMatrix() {
         if (debugOverride) {
             return lookAt(debugEyeX, debugEyeY, debugEyeZ,
                     debugTargetX, debugTargetY, debugTargetZ,
                     0f, 1f, 0f);
         }
+
         float[] eye = getEyePosition();
-        return lookAt(eye[0], eye[1], eye[2], pivotX, pivotY, pivotZ, 0f, 1f, 0f);
+        return lookAt(eye[0], eye[1], eye[2], targetX, targetY, targetZ, 0f, 1f, 0f);
     }
 
-    /**
-     * Computes the 4×4 projection matrix.
-     */
     public float[] getProjectionMatrix() {
         return perspective(fovY, aspect, near, far);
     }
 
-    /** Sets the viewport aspect ratio (width / height). */
     public void setAspect(float aspect) {
         this.aspect = aspect;
     }
 
-    /**
-     * Reframes the camera to neatly display a model with the given bounding radius
-     * and center.  Called automatically when a new model is loaded.
-     */
     public void frameModel(float centerX, float centerY, float centerZ, float boundingRadius) {
-        pivotX = centerX;
-        pivotY = centerY + boundingRadius * 0.5f;  // look at upper half so grid appears at bottom
-        pivotZ = centerZ;
-        // Fit the model in the FOV with a little breathing room
-        float distance = (boundingRadius / (float) Math.tan(fovY * 0.5f)) * 1.5f;
-        radius    = Math.max(distance, 0.1f);
-        azimuth   = 0f;
-        elevation = 0.3f;
+        targetX = centerX;
+        targetY = centerY + Math.max(1.0f, boundingRadius * 0.35f);
+        targetZ = centerZ;
+        distance = clamp(Math.max(DEFAULT_DISTANCE, boundingRadius * 2.5f), MIN_DISTANCE, MAX_DISTANCE);
+        yaw = DEFAULT_YAW;
+        pitch = DEFAULT_PITCH;
     }
 
-    /** Resets to default orbit position around the current pivot. */
     public void reset() {
-        azimuth   = 0f;
-        elevation = 0.3f;
-        radius    = 3.0f;
-        pivotX = 0f;
-        pivotY = 1.5f;
-        pivotZ = 0f;
+        targetX = DEFAULT_TARGET_X;
+        targetY = DEFAULT_TARGET_Y;
+        targetZ = DEFAULT_TARGET_Z;
+        distance = DEFAULT_DISTANCE;
+        yaw = DEFAULT_YAW;
+        pitch = DEFAULT_PITCH;
     }
 
-    /** Enables or disables the debug camera override. */
     public void setDebugOverride(boolean enabled) {
         this.debugOverride = enabled;
     }
 
-    /** Sets the forced debug eye/target used when debug override is enabled. */
     public void setDebugLookAt(float ex, float ey, float ez, float cx, float cy, float cz) {
         this.debugEyeX = ex;
         this.debugEyeY = ey;
@@ -163,98 +138,80 @@ public final class Camera {
         this.debugTargetZ = cz;
     }
 
-    // ── Private helpers ───────────────────────────────────────────────────────
-
     public float[] getEyePosition() {
-        float sinAz = (float) Math.sin(azimuth);
-        float cosAz = (float) Math.cos(azimuth);
-        float sinEl = (float) Math.sin(elevation);
-        float cosEl = (float) Math.cos(elevation);
-        return new float[]{
-            pivotX + radius * cosEl * sinAz,
-            pivotY + radius * sinEl,
-            pivotZ + radius * cosEl * cosAz
-        };
+        if (debugOverride) {
+            return new float[]{debugEyeX, debugEyeY, debugEyeZ};
+        }
+
+        float cosPitch = (float) Math.cos(pitch);
+        float eyeX = targetX + distance * cosPitch * (float) Math.sin(yaw);
+        float eyeY = targetY + distance * (float) Math.sin(pitch);
+        float eyeZ = targetZ + distance * cosPitch * (float) Math.cos(yaw);
+        return new float[]{eyeX, eyeY, eyeZ};
     }
 
-    private float[] getRightVector() {
-        // Right vector = cross(forward, worldUp), then normalize
-        float sinAz = (float) Math.sin(azimuth);
-        float cosAz = (float) Math.cos(azimuth);
-        // Forward in XZ plane: (sinAz, 0, cosAz), so right = (cosAz, 0, -sinAz)
-        return new float[]{ cosAz, 0f, -sinAz };
+    public float[] getTargetPosition() {
+        if (debugOverride) {
+            return new float[]{debugTargetX, debugTargetY, debugTargetZ};
+        }
+        return new float[]{targetX, targetY, targetZ};
     }
 
-    private float[] getUpVector() {
-        // Approximate "up" from elevation angle
-        float sinEl = (float) Math.sin(elevation);
-        float cosEl = (float) Math.cos(elevation);
-        float sinAz = (float) Math.sin(azimuth);
-        float cosAz = (float) Math.cos(azimuth);
-        return new float[]{
-            -sinEl * sinAz,
-             cosEl,
-            -sinEl * cosAz
-        };
+    public float[] getForwardVector() {
+        if (debugOverride) {
+            return normalize(new float[]{
+                    debugTargetX - debugEyeX,
+                    debugTargetY - debugEyeY,
+                    debugTargetZ - debugEyeZ
+            });
+        }
+        float[] eye = getEyePosition();
+        return normalize(new float[]{
+                targetX - eye[0],
+                targetY - eye[1],
+                targetZ - eye[2]
+        });
     }
 
-    // ── Matrix math ───────────────────────────────────────────────────────────
-
-    /** Standard lookAt matrix (column-major for OpenGL). */
     private static float[] lookAt(float ex, float ey, float ez,
-                                   float cx, float cy, float cz,
-                                   float ux, float uy, float uz) {
-        // Forward vector
-        float fx = cx - ex, fy = cy - ey, fz = cz - ez;
-        float flen = (float) Math.sqrt(fx*fx + fy*fy + fz*fz);
-        fx /= flen; fy /= flen; fz /= flen;
+                                  float cx, float cy, float cz,
+                                  float ux, float uy, float uz) {
+        float[] forward = normalize(new float[]{cx - ex, cy - ey, cz - ez});
+        float[] up = normalize(new float[]{ux, uy, uz});
+        float[] right = normalize(cross(forward, up));
+        float[] trueUp = normalize(cross(right, forward));
 
-        // Right vector = forward × up
-        float rx = fy*uz - fz*uy;
-        float ry = fz*ux - fx*uz;
-        float rz = fx*uy - fy*ux;
-        float rlen = (float) Math.sqrt(rx*rx + ry*ry + rz*rz);
-        rx /= rlen; ry /= rlen; rz /= rlen;
+        float fx = forward[0], fy = forward[1], fz = forward[2];
+        float rx = right[0],   ry = right[1],   rz = right[2];
+        float tux = trueUp[0], tuy = trueUp[1], tuz = trueUp[2];
 
-        // True up = right × forward
-        float tux = ry*fz - rz*fy;
-        float tuy = rz*fx - rx*fz;
-        float tuz = rx*fy - ry*fx;
-
-        // Column-major layout (OpenGL convention):
-        //   col 0 = right vector  (rx, ry, rz, 0)
-        //   col 1 = true-up vector (tux, tuy, tuz, 0)
-        //   col 2 = -forward vector (-fx, -fy, -fz, 0)
-        //   col 3 = translation
         return new float[]{
-             rx,   ry,   rz,  0f,
-             tux,  tuy,  tuz, 0f,
-            -fx,  -fy,  -fz,  0f,
-            -(rx*ex + ry*ey + rz*ez),
-            -(tux*ex + tuy*ey + tuz*ez),
-             (fx*ex + fy*ey + fz*ez),
-            1f
+                rx, ry, rz, 0f,
+                tux, tuy, tuz, 0f,
+                -fx, -fy, -fz, 0f,
+                -(rx * ex + ry * ey + rz * ez),
+                -(tux * ex + tuy * ey + tuz * ez),
+                (fx * ex + fy * ey + fz * ez),
+                1f
         };
     }
 
-    /** Standard perspective projection matrix (column-major). */
     private static float[] perspective(float fovY, float aspect, float near, float far) {
         float f = 1.0f / (float) Math.tan(fovY * 0.5f);
         float rangeInv = 1.0f / (near - far);
         return new float[]{
-            f / aspect, 0,  0,  0,
-            0,          f,  0,  0,
-            0,          0,  (far + near) * rangeInv, -1,
-            0,          0,  2f * far * near * rangeInv, 0
+                f / aspect, 0, 0, 0,
+                0, f, 0, 0,
+                0, 0, (far + near) * rangeInv, -1,
+                0, 0, 2f * far * near * rangeInv, 0
         };
     }
 
-    /** Multiplies two 4×4 column-major matrices: result = a * b. */
     public static float[] multiply(float[] a, float[] b) {
         float[] r = new float[16];
         for (int col = 0; col < 4; col++) {
             for (int row = 0; row < 4; row++) {
-                float sum = 0;
+                float sum = 0f;
                 for (int k = 0; k < 4; k++) {
                     sum += a[row + k * 4] * b[k + col * 4];
                 }
@@ -262,5 +219,25 @@ public final class Camera {
             }
         }
         return r;
+    }
+
+    private static float[] cross(float[] a, float[] b) {
+        return new float[]{
+                a[1] * b[2] - a[2] * b[1],
+                a[2] * b[0] - a[0] * b[2],
+                a[0] * b[1] - a[1] * b[0]
+        };
+    }
+
+    private static float[] normalize(float[] v) {
+        float len = (float) Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+        if (len == 0f) {
+            return new float[]{0f, 0f, -1f};
+        }
+        return new float[]{v[0] / len, v[1] / len, v[2] / len};
+    }
+
+    private static float clamp(float value, float min, float max) {
+        return Math.max(min, Math.min(max, value));
     }
 }

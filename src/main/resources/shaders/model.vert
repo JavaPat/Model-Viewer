@@ -8,6 +8,7 @@ layout(location = 3) in vec2 aUV;        // texture coordinates
 
 // ── Uniforms ───────────────────────────────────────────────────────────────
 uniform mat4 uMVP;        // pre-multiplied model-view-projection matrix
+uniform mat4 uModel;      // model rotation matrix for normals / model-space transforms
 uniform int  uRenderMode; // 0=colour+lighting  1=wireframe  2=flat colour
 
 // DEBUG: set to 1 to bypass MVP and render raw positions (tests vertex attributes).
@@ -23,7 +24,7 @@ out vec2 vUV;
 
 void main() {
     vColor  = aColor;
-    vNormal = aNormal;
+    vNormal = normalize(mat3(uModel) * aNormal);
     vUV     = aUV;
 
     if (uBypassMvp != 0) {

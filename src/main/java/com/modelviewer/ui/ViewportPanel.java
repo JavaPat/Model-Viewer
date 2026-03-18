@@ -1,7 +1,6 @@
 package com.modelviewer.ui;
 
 import com.modelviewer.model.ModelMesh;
-import com.modelviewer.render.Camera;
 import com.modelviewer.render.Renderer;
 import javafx.animation.AnimationTimer;
 import javafx.application.Platform;
@@ -52,10 +51,10 @@ import java.util.function.Consumer;
  *                remaining() always equals the full frame size.
  *
  * ──────────────────────────────────────────────────────────────────────────────
- * Mouse controls (forwarded to Camera)
+ * Mouse controls
  * ──────────────────────────────────────────────────────────────────────────────
- *   Left drag   → orbit
- *   Middle drag → pan
+ *   Left drag   → rotate model
+ *   Middle drag → rotate camera
  *   Scroll      → zoom
  */
 public final class ViewportPanel extends StackPane {
@@ -90,6 +89,15 @@ public final class ViewportPanel extends StackPane {
     private AnimationTimer fxTimer;
 
     private volatile boolean running = false;
+    private volatile boolean panUp;
+    private volatile boolean panDown;
+    private volatile boolean panLeft;
+    private volatile boolean panRight;
+
+    private float lastDragX;
+    private float lastDragY;
+    private boolean draggingPrimary;
+    private boolean draggingMiddle;
 
     /** Optional callback to surface render-thread events to the UI (e.g. debug panel). */
     private Consumer<String> renderEventHandler;
@@ -103,25 +111,60 @@ public final class ViewportPanel extends StackPane {
         widthProperty() .addListener((obs, o, nv) -> requestResize());
         heightProperty().addListener((obs, o, nv) -> requestResize());
 
-        // Mouse input forwarded to Camera
+        // Mouse input
         setFocusTraversable(true);
         setOnMousePressed(e -> {
             requestFocus();
-            renderer.getCamera().onMousePressed(
-                (float) e.getX(), (float) e.getY(),
-                e.isPrimaryButtonDown(), e.isMiddleButtonDown());
+            if (e.getButton() == javafx.scene.input.MouseButton.PRIMARY) {
+                draggingPrimary = true;
+                lastDragX = (float) e.getX();
+                lastDragY = (float) e.getY();
+            } else if (e.getButton() == javafx.scene.input.MouseButton.MIDDLE) {
+                draggingMiddle = true;
+                lastDragX = (float) e.getX();
+                lastDragY = (float) e.getY();
+            }
         });
-        setOnMouseReleased(e -> renderer.getCamera().onMouseReleased(
-                e.getButton() == javafx.scene.input.MouseButton.PRIMARY,
-                e.getButton() == javafx.scene.input.MouseButton.MIDDLE));
-        setOnMouseDragged(e -> renderer.getCamera().onMouseDragged(
-                (float) e.getX(), (float) e.getY()));
+        setOnMouseReleased(e -> {
+            if (e.getButton() == javafx.scene.input.MouseButton.PRIMARY) {
+                draggingPrimary = false;
+            } else if (e.getButton() == javafx.scene.input.MouseButton.MIDDLE) {
+                draggingMiddle = false;
+            }
+        });
+        setOnMouseDragged(e -> {
+            float x = (float) e.getX();
+            float y = (float) e.getY();
+            float dx = x - lastDragX;
+            float dy = y - lastDragY;
+            if (draggingPrimary) {
+                renderer.rotateModel(dx, dy);
+            } else if (draggingMiddle) {
+                renderer.getCamera().rotateLook(dx, dy);
+            }
+            lastDragX = x;
+            lastDragY = y;
+        });
         setOnScroll(e -> renderer.getCamera().onScroll((float) -e.getDeltaY() / 40f));
 
         // Key bindings
         setOnKeyPressed(e -> {
-            if (e.getCode() == javafx.scene.input.KeyCode.G) {
-                renderer.setGridVisible(!renderer.isGridVisible());
+            switch (e.getCode()) {
+                case W -> panUp = true;
+                case S -> panDown = true;
+                case A -> panLeft = true;
+                case D -> panRight = true;
+                case G -> renderer.setGridVisible(!renderer.isGridVisible());
+                default -> { }
+            }
+        });
+        setOnKeyReleased(e -> {
+            switch (e.getCode()) {
+                case W -> panUp = false;
+                case S -> panDown = false;
+                case A -> panLeft = false;
+                case D -> panRight = false;
+                default -> { }
             }
         });
 
@@ -234,8 +277,11 @@ public final class ViewportPanel extends StackPane {
             // Set to false once the triangle confirms the pipeline is healthy.
             renderer.setPipelineDiagnosticMode(false);
 
+            long lastFrameStart = System.nanoTime();
             while (running) {
                 long frameStart = System.nanoTime();
+                float deltaSeconds = (frameStart - lastFrameStart) / 1_000_000_000f;
+                lastFrameStart = frameStart;
 
                 // Handle FBO resize entirely on the GL thread
                 int w = pendingW, h = pendingH;
@@ -245,6 +291,8 @@ public final class ViewportPanel extends StackPane {
                     final int fw = w, fh = h;
                     Platform.runLater(() -> rebuildImageSurface(fw, fh));
                 }
+
+                renderer.getCamera().update(deltaSeconds, panUp, panDown, panLeft, panRight);
 
                 // Render frame into stagingBuf (render thread only)
                 try {

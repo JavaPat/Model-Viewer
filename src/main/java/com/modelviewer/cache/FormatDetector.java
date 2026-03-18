@@ -9,15 +9,14 @@ package com.modelviewer.cache;
  *
  *   data[-2] == 0xFF  AND  data[-1] == 0xFE   → MODERN
  *        The exact two-byte sentinel used by RuneLite jagexcache (~2019+).
- *        Trailer size: 2 bytes.  Header size: 21 bytes.
+ *        Trailer size: 2 bytes. Header size: 21 bytes.
+ *
+ *   data[-2] == 0xFF  AND  data[-1] == 0xFD   → NEW
+ *        Older post-legacy footer variant with a 23-byte trailer.
  *
  *   Otherwise                                  → LEGACY
- *        Covers RS2 317, all old OSRS formats, and any other variant.
- *        No sentinel bytes — the 18-byte footer is at the very end.
- *
- * Note: The older "new-format v12" sentinel [version, 0xFF, 0xFF] is treated
- * as LEGACY because its byte pattern is ambiguous with valid data bytes and
- * applying the modern decoder to it produces garbage geometry.
+ *        Covers RS2 317, original OSRS format, and anything without one of the
+ *        explicit sentinels above.
  * </pre>
  */
 public final class FormatDetector {
@@ -30,8 +29,13 @@ public final class FormatDetector {
          */
         MODERN,
         /**
+         * Newer pre-modern footer variant identified by the {@code FF FD}
+         * sentinel. Some caches still contain these alongside legacy entries.
+         */
+        NEW,
+        /**
          * RS2 317 / original OSRS format, and all formats without the strict
-         * {@code FF FE} sentinel.  No sentinel bytes.
+         * {@code FF FE}/{@code FF FD} sentinels. No sentinel bytes.
          */
         LEGACY
     }
@@ -46,11 +50,10 @@ public final class FormatDetector {
      */
     public static Format detect(byte[] data) {
         if (data == null || data.length < 3) return Format.LEGACY;
-        // Strict: MODERN only when the last two bytes are EXACTLY 0xFF 0xFE.
-        // Any other byte pattern — including [version, 0xFF, 0xFF] — is LEGACY.
         int last1 = data[data.length - 1] & 0xFF;
         int last2 = data[data.length - 2] & 0xFF;
         if (last2 == 0xFF && last1 == 0xFE) return Format.MODERN;
+        if (last2 == 0xFF && last1 == 0xFD) return Format.NEW;
         return Format.LEGACY;
     }
 
@@ -61,6 +64,7 @@ public final class FormatDetector {
     public static String label(byte[] data) {
         return switch (detect(data)) {
             case MODERN -> "modern(v" + (data[data.length - 1] & 0xFF) + ")";
+            case NEW -> "new(v" + (data[data.length - 1] & 0xFF) + ")";
             case LEGACY -> "legacy";
         };
     }
