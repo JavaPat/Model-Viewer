@@ -107,13 +107,20 @@ public final class Camera {
         this.aspect = aspect;
     }
 
-    public void frameModel(float centerX, float centerY, float centerZ, float boundingRadius) {
+    public void frameModel(float centerX, float centerY, float centerZ, float radius) {
+        radius = Math.max(1f, Math.min(radius, 100f));
+
         targetX = centerX;
-        targetY = centerY + Math.max(1.0f, boundingRadius * 0.35f);
+        targetY = centerY;
         targetZ = centerZ;
-        distance = clamp(Math.max(DEFAULT_DISTANCE, boundingRadius * 2.5f), MIN_DISTANCE, MAX_DISTANCE);
-        yaw = DEFAULT_YAW;
-        pitch = DEFAULT_PITCH;
+
+        // 🔥 Force camera ABOVE and BACK
+        distance = radius * 2.5f;
+
+        yaw = 0f;
+
+        // 🔥 CRITICAL: strong downward angle
+        pitch = (float) Math.toRadians(-25.0);
     }
 
     public void reset() {

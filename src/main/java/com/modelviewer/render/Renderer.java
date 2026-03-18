@@ -257,11 +257,6 @@ public final class Renderer {
         shader = new ShaderProgram("/shaders/model.vert", "/shaders/model.frag");
         camera.setAspect((float) width / height);
 
-        // Build the test triangle once so it is ready to use at any time.
-        // It lives in NDC space — an identity MVP matrix will show it regardless
-        // of camera settings. Useful to verify the pipeline without model data.
-        testTriangleModel = MeshUploader.createTestTriangle();
-
         // Initialize the raw pipeline diagnostic (separate VAO, inline shaders, no FBO).
         initDiagnosticPipeline();
 
@@ -303,56 +298,81 @@ public final class Renderer {
                 Consumer<String> el = eventLogger;
                 if (el != null) el.accept(uploadMsg);
             }
+
             currentGpuModel = cached;
             currentModelId  = mesh.modelId;
             firstDrawLogged = false;
             modelRotationX = DEFAULT_MODEL_ROTATION_X;
             modelRotationY = DEFAULT_MODEL_ROTATION_Y;
-            float inv128 = 1.0f / 128.0f;
-            float radius = mesh.boundingRadius() * inv128;
-            camera.frameModel(0, 0, 0, radius);
+
+            // 🔥 FIXED CAMERA FRAMING (THIS WAS THE PROBLEM)
+            final float SCALE = 1.0f / 128.0f;
+
+            float minX = Float.MAX_VALUE, maxX = -Float.MAX_VALUE;
+            float minY = Float.MAX_VALUE, maxY = -Float.MAX_VALUE;
+            float minZ = Float.MAX_VALUE, maxZ = -Float.MAX_VALUE;
+
+            for (int i = 0; i < mesh.vertexCount; i++) {
+                float x = mesh.vertexX[i] * SCALE;
+                float y = mesh.vertexY[i] * SCALE;
+                float z = mesh.vertexZ[i] * SCALE;
+
+                float rx = x;
+                float ry = z;
+                float rz = -y;
+
+                if (rx < minX) minX = rx;
+                if (rx > maxX) maxX = rx;
+                if (ry < minY) minY = ry;
+                if (ry > maxY) maxY = ry;
+                if (rz < minZ) minZ = rz;
+                if (rz > maxZ) maxZ = rz;
+            }
+
+            float centerX = (minX + maxX) * 0.5f;
+            float centerY = (minY + maxY) * 0.5f;
+            float centerZ = (minZ + maxZ) * 0.5f;
+
+            float sizeX = maxX - minX;
+            float sizeZ = maxZ - minZ;
+            float sizeY = maxY - minY;
+            float radius = Math.max(Math.max(sizeX, sizeZ), sizeY);
+
+            // Clamp to prevent insane zoom from broken models
+            radius = Math.max(1f, Math.min(radius, 100f));
+
+            // Frame camera properly
+            camera.frameModel(centerX, centerY, centerZ, radius);
         }
 
-        // ── Pipeline diagnostic (bypasses FBO, shaders, and model system) ────
+        // ── Pipeline diagnostic ───────────────────────────────────────────────
         if (pipelineDiagnosticMode) {
             renderDiagnosticFrame(dest);
             return;
         }
 
         // ── Render ────────────────────────────────────────────────────────────
-        // Render to the default framebuffer (GL_BACK) instead of the FBO.
-        // GL_BACK readback via readPixelsFromDefault is confirmed working (diagnostic mode).
-        // FBO readback was not independently confirmed, so we bypass it here.
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glViewport(0, 0, context.getWidth(), context.getHeight());
         glClearColor(bgR, bgG, bgB, 1f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        // Drain any GL errors that may have accumulated before this frame so
-        // that the error check below only reports errors from this frame's draw.
-        //noinspection StatementWithEmptyBody
-        while (glGetError() != GL_NO_ERROR) { /* drain */ }
+        while (glGetError() != GL_NO_ERROR) {}
 
         if (testTriangleMode && testTriangleModel != null && !testTriangleModel.isFreed()) {
-            // ── Test triangle diagnostic mode ─────────────────────────────────
-            // Uses an identity MVP so the triangle is drawn directly in NDC space.
-            // If this triangle is visible but the real model is not, the issue
-            // is in the model data (vertex positions, normals, colours) rather
-            // than in the rendering pipeline.
             shader.use();
             float[] identity = {
-                1,0,0,0,
-                0,1,0,0,
-                0,0,1,0,
-                0,0,0,1
+                    1,0,0,0,
+                    0,1,0,0,
+                    0,0,1,0,
+                    0,0,0,1
             };
             shader.setUniformMatrix4f("uMVP", identity);
             shader.setUniformMatrix4f("uModel", identity);
-            shader.setUniform1i("uRenderMode", 2);  // flat colour — no lighting needed
+            shader.setUniform1i("uRenderMode", 2);
             shader.setUniform3f("uLightDir", 0f, 1f, 0f);
             shader.setUniform3f("uWireColor", 1f, 1f, 0f);
             testTriangleModel.draw(false);
-            log.info("[RENDER] Test triangle drawn (GL_TRIANGLES, 3 indices) — disable testTriangleMode to show real model");
             ShaderProgram.unbind();
 
         } else if (currentGpuModel != null && !currentGpuModel.isFreed()) {
@@ -371,53 +391,11 @@ public final class Renderer {
             shader.setUniform3f("uWireColor", 0.85f, 0.85f, 0.85f);
             shader.setUniform1i("uBypassMvp", bypassMvp ? 1 : 0);
 
-            // GL_TRIANGLES is always used — never a variable draw mode.
             currentGpuModel.draw(renderMode == 1);
-
-            // One-time confirmation that draw calls are executing — includes MVP
-            // values and bypass flag so failures are diagnosable from the log alone.
-            if (!firstDrawLogged) {
-                firstDrawLogged = true;
-                float[] eye = camera.getEyePosition();
-                float[] target = camera.getTargetPosition();
-                float[] forward = camera.getForwardVector();
-                String drawMsg = String.format(
-                    "[RENDER] First draw: model #%d, %d indices (GL_TRIANGLES), shader_mode=%d, bypassMvp=%b, eye=(%.3f,%.3f,%.3f), target=(%.3f,%.3f,%.3f), forward=(%.3f,%.3f,%.3f)%n" +
-                    "  MVP col0=(%.3f %.3f %.3f %.3f)%n" +
-                    "  MVP col1=(%.3f %.3f %.3f %.3f)%n" +
-                    "  MVP col2=(%.3f %.3f %.3f %.3f)%n" +
-                    "  MVP col3=(%.3f %.3f %.3f %.3f)",
-                    currentModelId, currentGpuModel.getIndexCount(), renderMode, bypassMvp,
-                    eye[0], eye[1], eye[2],
-                    target[0], target[1], target[2],
-                    forward[0], forward[1], forward[2],
-                    mvp[0],  mvp[1],  mvp[2],  mvp[3],
-                    mvp[4],  mvp[5],  mvp[6],  mvp[7],
-                    mvp[8],  mvp[9],  mvp[10], mvp[11],
-                    mvp[12], mvp[13], mvp[14], mvp[15]);
-                log.info(drawMsg);
-                Consumer<String> el = eventLogger;
-                if (el != null) el.accept(String.format(
-                    "[RENDER] First draw: model #%d, %d indices, bypassMvp=%b, eye=(%.2f,%.2f,%.2f), target=(%.2f,%.2f,%.2f), forward=(%.2f,%.2f,%.2f)",
-                    currentModelId, currentGpuModel.getIndexCount(), bypassMvp,
-                    eye[0], eye[1], eye[2],
-                    target[0], target[1], target[2],
-                    forward[0], forward[1], forward[2]));
-            }
-
-            // Drain ALL GL errors so none are silently missed.
-            int glErr;
-            while ((glErr = glGetError()) != GL_NO_ERROR) {
-                String errMsg = "[RENDER] GL error 0x" + Integer.toHexString(glErr) + " after draw";
-                log.error(errMsg);
-                Consumer<String> el = eventLogger;
-                if (el != null) el.accept(errMsg);
-            }
 
             ShaderProgram.unbind();
         }
 
-        // ── Ground grid + axis lines ──────────────────────────────────────────
         {
             float[] proj = camera.getProjectionMatrix();
             float[] view = camera.getViewMatrix();

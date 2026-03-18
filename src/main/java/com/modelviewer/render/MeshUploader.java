@@ -25,50 +25,53 @@ public final class MeshUploader {
         int vCount = mesh.vertexCount;
         int fCount = mesh.faceCount;
 
-        final float INV128 = 1.0f / 128.0f;
+        // ✅ CORRECT SCALE (OSRS units → world units)
+        final float SCALE = 1.0f / 128.0f;
 
         float[] renderX = new float[vCount];
         float[] renderY = new float[vCount];
         float[] renderZ = new float[vCount];
 
-        float minRenderX = Float.MAX_VALUE, maxRenderX = -Float.MAX_VALUE;
-        float minRenderY = Float.MAX_VALUE, maxRenderY = -Float.MAX_VALUE;
-        float minRenderZ = Float.MAX_VALUE, maxRenderZ = -Float.MAX_VALUE;
+        float minX = Float.MAX_VALUE, maxX = -Float.MAX_VALUE;
+        float minY = Float.MAX_VALUE, maxY = -Float.MAX_VALUE;
+        float minZ = Float.MAX_VALUE, maxZ = -Float.MAX_VALUE;
 
-        // ✅ FIXED AXIS CONVERSION (OSRS → Y-UP)
+        // ✅ AXIS CONVERSION + SCALE
         for (int i = 0; i < vCount; i++) {
-            float x = mesh.vertexX[i] * INV128;
-            float y = mesh.vertexY[i] * INV128;
-            float z = mesh.vertexZ[i] * INV128;
+            float x = mesh.vertexX[i] * SCALE;
+            float y = mesh.vertexY[i] * SCALE;
+            float z = mesh.vertexZ[i] * SCALE;
 
-            float finalX = -x;
-            float finalY = z;   // ← CRITICAL FIX
-            float finalZ = -y;
+            float finalX = x;
+            float finalY = z;     // Z → Y
+            float finalZ = -y;    // Y → -Z
 
             renderX[i] = finalX;
             renderY[i] = finalY;
             renderZ[i] = finalZ;
 
-            if (finalX < minRenderX) minRenderX = finalX;
-            if (finalX > maxRenderX) maxRenderX = finalX;
-            if (finalY < minRenderY) minRenderY = finalY;
-            if (finalY > maxRenderY) maxRenderY = finalY;
-            if (finalZ < minRenderZ) minRenderZ = finalZ;
-            if (finalZ > maxRenderZ) maxRenderZ = finalZ;
+            if (finalX < minX) minX = finalX;
+            if (finalX > maxX) maxX = finalX;
+            if (finalY < minY) minY = finalY;
+            if (finalY > maxY) maxY = finalY;
+            if (finalZ < minZ) minZ = finalZ;
+            if (finalZ > maxZ) maxZ = finalZ;
         }
 
-        float centerX = (minRenderX + maxRenderX) * 0.5f;
-        float centerZ = (minRenderZ + maxRenderZ) * 0.5f;
-        float groundOffset = minRenderY;
+        // ✅ CENTER + GROUND ALIGN
+        float centerX = (minX + maxX) * 0.5f;
+        float centerZ = (minZ + maxZ) * 0.5f;
+        float centerY = (minY + maxY) * 0.5f;
 
         FloatBuffer positions = BufferUtils.createFloatBuffer(vCount * 3);
         for (int i = 0; i < vCount; i++) {
             positions.put(renderX[i] - centerX);
-            positions.put(renderY[i] - groundOffset);
+            positions.put(renderY[i] - centerY);
             positions.put(renderZ[i] - centerZ);
         }
         positions.flip();
 
+        // ✅ NORMALS (match axis conversion)
         float[] nx = new float[vCount];
         float[] ny = new float[vCount];
         float[] nz = new float[vCount];
@@ -99,8 +102,8 @@ public final class MeshUploader {
         for (int i = 0; i < vCount; i++) {
             float len = (float) Math.sqrt(nx[i]*nx[i] + ny[i]*ny[i] + nz[i]*nz[i]);
             if (len > 0f) {
-                float finalNx = -nx[i];
-                float finalNy = nz[i];   // ← CRITICAL FIX
+                float finalNx = nx[i];
+                float finalNy = nz[i];
                 float finalNz = -ny[i];
 
                 normals.put(finalNx / len);
@@ -112,19 +115,20 @@ public final class MeshUploader {
         }
         normals.flip();
 
+        // ✅ UVs (simple projection)
         float[] uvU = new float[vCount];
         float[] uvV = new float[vCount];
 
-        float rangeX = (mesh.maxX != mesh.minX) ? (float)(mesh.maxX - mesh.minX) : 1.0f;
-        float rangeZ = (mesh.maxZ != mesh.minZ) ? (float)(mesh.maxZ - mesh.minZ) : 1.0f;
+        float rangeX = (mesh.maxX != mesh.minX) ? (float)(mesh.maxX - mesh.minX) : 1f;
+        float rangeZ = (mesh.maxZ != mesh.minZ) ? (float)(mesh.maxZ - mesh.minZ) : 1f;
 
         for (int i = 0; i < fCount; i++) {
             int ai = mesh.faceVertexA[i];
             int bi = mesh.faceVertexB[i];
             int ci = mesh.faceVertexC[i];
-            if (ai < 0 || bi < 0 || ci < 0 || ai >= vCount || bi >= vCount || ci >= vCount) continue;
 
             for (int v : new int[]{ai, bi, ci}) {
+                if (v < 0 || v >= vCount) continue;
                 uvU[v] = (mesh.vertexX[v] - mesh.minX) / rangeX;
                 uvV[v] = (mesh.vertexZ[v] - mesh.minZ) / rangeZ;
             }
@@ -132,11 +136,11 @@ public final class MeshUploader {
 
         FloatBuffer uvBuffer = BufferUtils.createFloatBuffer(vCount * 2);
         for (int i = 0; i < vCount; i++) {
-            uvBuffer.put(uvU[i]);
-            uvBuffer.put(uvV[i]);
+            uvBuffer.put(uvU[i]).put(uvV[i]);
         }
         uvBuffer.flip();
 
+        // ✅ COLORS
         float[] colorR = new float[vCount];
         float[] colorG = new float[vCount];
         float[] colorB = new float[vCount];
@@ -180,7 +184,7 @@ public final class MeshUploader {
         int posVbo = uploadFloatVBO(positions, 0, 3);
         int colVbo = uploadFloatVBO(colors, 1, 3);
         int norVbo = uploadFloatVBO(normals, 2, 3);
-        int uvVbo = uploadFloatVBO(uvBuffer, 3, 2);
+        int uvVbo  = uploadFloatVBO(uvBuffer, 3, 2);
 
         int ebo = glGenBuffers();
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
@@ -198,59 +202,5 @@ public final class MeshUploader {
         glVertexAttribPointer(attribIndex, components, GL_FLOAT, false, components * Float.BYTES, 0L);
         glEnableVertexAttribArray(attribIndex);
         return vbo;
-    }
-
-    public static GpuModel createTestTriangle() {
-        FloatBuffer positions = BufferUtils.createFloatBuffer(9)
-                .put(new float[]{
-                        -0.7f, -0.7f, 0f,
-                        0.7f, -0.7f, 0f,
-                        0f,   0.7f,  0f
-                });
-        positions.flip();
-
-        FloatBuffer colors = BufferUtils.createFloatBuffer(9)
-                .put(new float[]{
-                        1f, 1f, 0f,
-                        1f, 1f, 0f,
-                        1f, 1f, 0f
-                });
-        colors.flip();
-
-        FloatBuffer normals = BufferUtils.createFloatBuffer(9)
-                .put(new float[]{
-                        0f, 0f, 1f,
-                        0f, 0f, 1f,
-                        0f, 0f, 1f
-                });
-        normals.flip();
-
-        FloatBuffer uvs = BufferUtils.createFloatBuffer(6)
-                .put(new float[]{
-                        0f, 0f,
-                        1f, 0f,
-                        0.5f, 1f
-                });
-        uvs.flip();
-
-        IntBuffer indices = BufferUtils.createIntBuffer(3)
-                .put(new int[]{0, 1, 2});
-        indices.flip();
-
-        int vao = glGenVertexArrays();
-        glBindVertexArray(vao);
-
-        int posVbo = uploadFloatVBO(positions, 0, 3);
-        int colVbo = uploadFloatVBO(colors,    1, 3);
-        int norVbo = uploadFloatVBO(normals,   2, 3);
-        int uvVbo  = uploadFloatVBO(uvs,       3, 2);
-
-        int ebo = glGenBuffers();
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices, GL_STATIC_DRAW);
-
-        glBindVertexArray(0);
-
-        return new GpuModel(vao, posVbo, colVbo, norVbo, uvVbo, ebo, 3);
     }
 }
