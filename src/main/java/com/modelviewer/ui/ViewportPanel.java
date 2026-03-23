@@ -250,8 +250,12 @@ public final class ViewportPanel extends StackPane {
             pixelBuffer.updateBuffer(pb -> {
                 ByteBuffer b = pb.getBuffer();
                 b.clear();
-                src.rewind();
-                b.put(src);
+                // Use duplicate() so we get our own position/limit view of the
+                // staging data without touching stagingBuf's own position — that
+                // would race with the render thread's explicit per-row writes.
+                ByteBuffer snapshot = src.duplicate();
+                snapshot.rewind();
+                b.put(snapshot);
                 b.rewind();
                 return null;   // full-frame update
             });

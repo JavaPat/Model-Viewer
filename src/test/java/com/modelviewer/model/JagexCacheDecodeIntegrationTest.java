@@ -23,6 +23,8 @@ class JagexCacheDecodeIntegrationTest {
             assumeTrue(ids.length > 0, "No model IDs in Jagex cache");
 
             int decoded = 0;
+            int withGeometry = 0;
+            int nullResult = 0;
             int attempted = 0;
             for (int modelId : ids) {
                 byte[] data = cache.readArchiveData(CacheLibrary.INDEX_MODELS, modelId);
@@ -32,8 +34,22 @@ class JagexCacheDecodeIntegrationTest {
 
                 attempted++;
                 ModelMesh mesh = ModelDecoder.decode(modelId, data);
-                if (mesh != null) {
+                if (mesh == null) {
+                    nullResult++;
+                    System.out.println("  NULL: model " + modelId);
+                } else {
                     decoded++;
+                    boolean hasGeometry = mesh.vertexCount > 0 && mesh.faceCount > 0
+                            && mesh.vertexX[0] != 0 || mesh.vertexY[0] != 0 || mesh.vertexZ[0] != 0;
+                    if (hasGeometry) {
+                        withGeometry++;
+                        System.out.printf("  OK:   model %-6d  v=%-4d f=%-4d  X[%d..%d] Y[%d..%d] Z[%d..%d]%n",
+                                modelId, mesh.vertexCount, mesh.faceCount,
+                                mesh.minX, mesh.maxX, mesh.minY, mesh.maxY, mesh.minZ, mesh.maxZ);
+                    } else {
+                        System.out.printf("  ZERO: model %-6d  v=%-4d f=%-4d  (all-zero geometry)%n",
+                                modelId, mesh.vertexCount, mesh.faceCount);
+                    }
                 }
 
                 if (attempted >= 20) {
@@ -41,8 +57,12 @@ class JagexCacheDecodeIntegrationTest {
                 }
             }
 
-            assertTrue(decoded >= 10,
-                    "Decoded only " + decoded + " of first " + attempted + " Jagex cache models");
+            System.out.printf("Jagex cache: attempted=%d  decoded=%d  withGeometry=%d  null=%d%n",
+                    attempted, decoded, withGeometry, nullResult);
+
+            assertTrue(withGeometry >= 10,
+                    "Only " + withGeometry + " of " + attempted + " Jagex models have real geometry"
+                    + " (decoded=" + decoded + ", null=" + nullResult + ")");
         }
     }
 }

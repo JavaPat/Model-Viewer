@@ -30,13 +30,14 @@ public final class ModelDecoder {
         int b1 = data[data.length - 2] & 0xFF;
         int b2 = data[data.length - 1] & 0xFF;
 
-        boolean isModern = (b1 == 0xFF && (b2 == 0xFE || b2 == 0xFD));
-        boolean isNew    = (b1 == 0xFF && b2 == 0xFF);
+        boolean isModern = (b1 == 0xFF && b2 == 0xFE);
+        boolean isNew    = (b1 == 0xFF && b2 == 0xFD);
 
         ModelMesh mesh = null;
 
         // ✅ Try modern first (OSRS main format)
         if (isModern) {
+            System.out.println(">>> CALLING MODERN DECODER <<<");
             mesh = new ModernModelDecoder().decode(modelId, data);
         }
 
@@ -71,28 +72,26 @@ public final class ModelDecoder {
         Buffer yBuf    = new Buffer(data); yBuf.offset    = yOff;
         Buffer zBuf    = new Buffer(data); zBuf.offset    = zOff;
 
-        int lastX = 0;
-        int lastY = 0;
-        int lastZ = 0;
+        int baseX = 0, baseY = 0, baseZ = 0;
 
         for (int i = 0; i < count; i++) {
             int flags = flagBuf.readUnsignedByte();
 
             int dx = 0, dy = 0, dz = 0;
 
-            if ((flags & 1) != 0) dx = xBuf.readSignedSmart();
-            if ((flags & 2) != 0) dy = yBuf.readSignedSmart();
-            if ((flags & 4) != 0) dz = zBuf.readSignedSmart();
+            if ((flags & 1) != 0) dx = xBuf.readShortSmart();
+            if ((flags & 2) != 0) dy = yBuf.readShortSmart();
+            if ((flags & 4) != 0) dz = zBuf.readShortSmart();
 
-            lastX += dx;
-            lastY += dy;
-            lastZ += dz;
+            // ✅ IMPORTANT: accumulate per vertex (correct)
+            baseX += dx;
+            baseY += dy;
+            baseZ += dz;
 
-            vx[i] = lastX;
-            vy[i] = lastY;
-            vz[i] = lastZ;
+            vx[i] = baseX;
+            vy[i] = baseY;
+            vz[i] = baseZ;
         }
-        System.out.println(vx[0] + ", " + vy[0] + ", " + vz[0]);
     }
 
 
@@ -101,7 +100,6 @@ public final class ModelDecoder {
                                 int faceCount,
                                 int[] fa, int[] fb, int[] fc) {
 
-
         Buffer comp = new Buffer(data); comp.offset = compressOff;
         Buffer idx  = new Buffer(data); idx.offset  = indexOff;
 
@@ -109,22 +107,20 @@ public final class ModelDecoder {
         int last = 0;
 
         for (int i = 0; i < faceCount; i++) {
-            int type = comp.readUnsignedByte();
+            int type = comp.readUnsignedByte() & 7;
 
             if (type == 1) {
                 a = idx.readUnsignedSmart() + last;
-                b = idx.readUnsignedSmart() + last;
-                c = idx.readUnsignedSmart() + last;
+                b = idx.readUnsignedSmart() + a;
+                c = idx.readUnsignedSmart() + b;
                 last = c;
             }
             else if (type == 2) {
-                // 🔥 FAN behavior
                 b = c;
                 c = idx.readUnsignedSmart() + last;
                 last = c;
             }
             else if (type == 3) {
-                // 🔥 FAN flip
                 a = c;
                 c = idx.readUnsignedSmart() + last;
                 last = c;
@@ -141,10 +137,7 @@ public final class ModelDecoder {
             fb[i] = b;
             fc[i] = c;
         }
-
     }
-
-
 
     static void validateFaceIndices(int vertexCount, int[] fa, int[] fb, int[] fc) {
         for (int i = 0; i < fa.length; i++) {
@@ -180,7 +173,7 @@ public final class ModelDecoder {
         float sf = s / 7.0f;
         float q = (lf < 0.5f) ? lf * (1f + sf) : lf + sf - lf * sf;
         float p = 2f * lf - q;
-        float hf = h / 63.0f;
+        float hf = h / 64.0f;
 
         float r = hueToRgbChannel(p, q, hf + 1f/3f);
         float g = hueToRgbChannel(p, q, hf);

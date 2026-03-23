@@ -119,8 +119,8 @@ public final class Camera {
 
         yaw = 0f;
 
-        // 🔥 CRITICAL: strong downward angle
-        pitch = (float) Math.toRadians(-25.0);
+        // Camera above the model, looking down — positive pitch lifts eye above target
+        pitch = (float) Math.toRadians(25.0);
     }
 
     public void reset() {
@@ -192,10 +192,13 @@ public final class Camera {
         float rx = right[0],   ry = right[1],   rz = right[2];
         float tux = trueUp[0], tuy = trueUp[1], tuz = trueUp[2];
 
+        // Column-major storage: each group of 4 floats is one column of the matrix.
+        // The view matrix rows are [right], [up], [back] with translation in col 3.
+        // Columns contain the first/second/third components of each row axis.
         return new float[]{
-                rx, ry, rz, 0f,
-                tux, tuy, tuz, 0f,
-                -fx, -fy, -fz, 0f,
+                rx,  tux, -fx, 0f,   // column 0
+                ry,  tuy, -fy, 0f,   // column 1
+                rz,  tuz, -fz, 0f,   // column 2
                 -(rx * ex + ry * ey + rz * ez),
                 -(tux * ex + tuy * ey + tuz * ez),
                 (fx * ex + fy * ey + fz * ez),

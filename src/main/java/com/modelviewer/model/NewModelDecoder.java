@@ -48,18 +48,15 @@ final class NewModelDecoder {
         int vertexFlagsOff  = pos; pos += vertexCount;
         int faceCompressOff = pos; pos += faceCount;
         int facePriorityOff = pos; pos += (globalPriority == 0xFF) ? faceCount : 0;
+        int faceAlphaOff    = pos; pos += (hasFaceAlpha != 0) ? faceCount : 0;
         int faceSkinOff     = pos; pos += (hasFaceSkins != 0) ? faceCount : 0;
         int faceTypeOff     = pos; pos += (flags & 1) != 0 ? faceCount : 0;
-        int vertexSkinOff   = pos; pos += (hasVertexSkins != 0) ? vertexCount : 0;
-        int faceAlphaOff    = pos; pos += (hasFaceAlpha != 0) ? faceCount : 0;
-        int faceIndexOff    = pos; pos += faceIndexLen;
-
-        // ✅ FIX: textures are SHORTS (2 bytes each)
         int faceTextureOff  = pos; pos += (hasFaceTextures != 0) ? faceCount * 2 : 0;
-
         int texCoordOff     = pos; pos += texCoordLen;
         int faceColorOff    = pos; pos += faceCount * 2;
         int texFaceOff      = pos; pos += texFaceCount * 6;
+        int vertexSkinOff   = pos; pos += (hasVertexSkins != 0) ? vertexCount : 0;
+        int faceIndexOff    = pos; pos += faceIndexLen;
         int vertexXOff      = pos; pos += xLen;
         int vertexYOff      = pos; pos += yLen;
         int vertexZOff      = pos; pos += zLen;

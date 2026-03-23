@@ -90,8 +90,8 @@ public final class Renderer {
                 float z = mesh.vertexZ[i] * SCALE;
 
                 float rx = x;
-                float ry = z;
-                float rz = -y;
+                float ry = -y;
+                float rz = z;
 
                 if (!Float.isFinite(rx) || !Float.isFinite(ry) || !Float.isFinite(rz)) continue;
 
@@ -104,6 +104,7 @@ public final class Renderer {
             }
 
             float radius = 2.0f;
+            float centerX = 0f, centerY = 0f, centerZ = 0f;
 
             if (minX != Float.MAX_VALUE) {
                 float sizeX = maxX - minX;
@@ -118,9 +119,13 @@ public final class Renderer {
 
                 radius = Math.min(radius, 25.0f);
                 radius = Math.max(radius, 1.0f);
+
+                centerX = (minX + maxX) * 0.5f;
+                centerY = (minY + maxY) * 0.5f;
+                centerZ = (minZ + maxZ) * 0.5f;
             }
 
-            camera.frameModel(0f, 0f, 0f, radius);
+            camera.frameModel(centerX, centerY, centerZ, radius);
         }
 
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -140,6 +145,9 @@ public final class Renderer {
             shader.setUniformMatrix4f("uMVP", mvp);
             shader.setUniformMatrix4f("uModel", model);
             shader.setUniform1i("uRenderMode", renderMode);
+            shader.setUniform3f("uLightDir", 0.6f, 1.0f, 0.8f);
+            shader.setUniform3f("uWireColor", 1.0f, 1.0f, 1.0f);
+            shader.setUniform1i("uHasTexture", 0);
 
             currentGpuModel.draw(renderMode == 1);
 

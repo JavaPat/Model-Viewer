@@ -11,10 +11,10 @@ class ModelDecoderTest {
     @Test
     void readSmartMatchesOsrsEncoding() {
         Buffer oneByte = new Buffer(new byte[] { 127 });
-        assertEquals(127, oneByte.readSmart());
+        assertEquals(127, oneByte.readUnsignedSmart());
 
         Buffer twoByte = new Buffer(new byte[] { (byte) 0x80, (byte) 0xC8 });
-        assertEquals(200, twoByte.readSmart());
+        assertEquals(200, twoByte.readUnsignedSmart());
     }
 
     @Test

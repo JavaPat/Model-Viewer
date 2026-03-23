@@ -136,12 +136,16 @@ public final class RenderContext {
         readBuf.clear();
         glReadPixels(0, 0, width, height, GL_BGRA, GL_UNSIGNED_BYTE, readBuf);
 
-        // Flip vertically: OpenGL row 0 = bottom, JavaFX row 0 = top
+        // Flip vertically: OpenGL row 0 = bottom, JavaFX row 0 = top.
+        // dest.position is set explicitly per row so concurrent FX-thread reads
+        // of stagingBuf (via duplicate()) cannot cause a BufferOverflowException.
         int rowBytes = width * 4;
-        dest.clear();
         for (int row = height - 1; row >= 0; row--) {
+            int destRow = (height - 1 - row);
             readBuf.limit(row * rowBytes + rowBytes);
             readBuf.position(row * rowBytes);
+            dest.limit(destRow * rowBytes + rowBytes);
+            dest.position(destRow * rowBytes);
             dest.put(readBuf);
         }
         dest.rewind();
@@ -170,12 +174,16 @@ public final class RenderContext {
         readBuf.clear();
         glReadPixels(0, 0, width, height, GL_BGRA, GL_UNSIGNED_BYTE, readBuf);
 
-        // Flip vertically: OpenGL row 0 = bottom, JavaFX row 0 = top
+        // Flip vertically: OpenGL row 0 = bottom, JavaFX row 0 = top.
+        // dest.position is set explicitly per row so concurrent FX-thread reads
+        // of stagingBuf (via duplicate()) cannot cause a BufferOverflowException.
         int rowBytes = width * 4;
-        dest.clear();
         for (int row = height - 1; row >= 0; row--) {
+            int destRow = (height - 1 - row);
             readBuf.limit(row * rowBytes + rowBytes);
             readBuf.position(row * rowBytes);
+            dest.limit(destRow * rowBytes + rowBytes);
+            dest.position(destRow * rowBytes);
             dest.put(readBuf);
         }
         dest.rewind();
